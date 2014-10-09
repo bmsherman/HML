@@ -1,0 +1,162 @@
+{
+
+module Parse where
+
+import Data.Char (toLower)
+import Lex
+import AST
+
+}
+
+%name parse
+%tokentype { Token }
+%error { parseError }
+
+%token
+  '('              { Paren L }
+  ')'              { Paren R }
+  '{'              { Brace L }
+  '}'              { Brace R }
+  '['              { Bracket L }
+  ']'              { Bracket R }
+  ':'              { Colon }
+  ','              { Comma }
+  ';'              { Semi }
+  '+'              { IntBinOp Plus }
+  '-'              { IntBinOp Minus }
+  '*'              { IntBinOp Times }
+  intbincmp        { IntBinCmp $$ }
+  '~'              { Negate }
+  '||'             { Or }
+  '=>'             { To }
+  '>>'             { Seq }
+  int              { Int $$ }
+  string           { String $$ }
+  '='              { Equals  }
+  data             { Data }
+  func             { Func }
+  case             { Case }
+  of               { Of   }
+  let              { Let  }
+  in               { In   }
+  intty            { UName x | x == "Int" }
+  strty            { UName x | x == "String" }
+  uname            { UName $$ }
+  lname            { LName $$ }
+
+%right '||'
+%right '>>'
+%right ','
+%nonassoc '='
+%nonassoc intbincmp
+%left '+' '-'
+%left '*' 
+
+%%
+
+DeclList :: { [Decl] }
+  : { [ ] }
+  | Decl ';' DeclList { $1 : $3 }
+
+Decl :: { Decl }
+  : data uname '(' IdentList ')' of DataAltList 
+     { DataDecl (NTyCon $2) (DataDefn $4 $7) }
+  | func lname '(' TypedIdentList ')' Typing '=' Expr
+     { FuncDecl (NTerm $2) (FuncDefn $4 $6 $8) }
+
+Expr :: { Expr }
+  : int { EInt $1 }
+  | string { EStr $1 }
+  | lname { EVar $1 }
+  | uname '(' ExprList ')' { EConstrAp (NDataCon $1) $3 }
+  | lname '(' ExprList ')' { EAp (NTerm $1) $3 }
+  | case Expr of '{' ProdList '}' { ECase $2 $5 }
+  | let TypedIdent '=' Expr in Expr { ELet $2 $4 $6 }
+  | Expr '+' Expr { EIntBinOp Plus $1 $3 }
+  | Expr '-' Expr { EIntBinOp Minus $1 $3 }
+  | Expr '*' Expr { EIntBinOp Times $1 $3 }
+  | Expr intbincmp Expr { EIntBinCmp $2 $1 $3 }
+  | '~' Expr { ENegate $2 }
+  | Expr '>>' Expr { ESeq $1 $3 }
+  | Expr ':' TyExpr { Typed $1 $3 }
+  | '(' Expr ')' { $2 }
+
+ExprList :: { [Expr] }
+  :    { [] }
+  | ExprList1 { $1 }
+
+ExprList1 :: { [Expr] }
+  : Expr { [ $1 ] }
+  | Expr ',' ExprList1 { $1 : $3 }
+
+TyExpr :: { TyExpr }
+  : intty { IntTy }
+  | strty { StrTy }
+  | lname { TyVar $1 }
+  | uname '(' TyExprList ')' { TAp (NTyCon $1) $3 }
+
+TyExprList :: { [TyExpr] }
+ :    { [] }
+ | TyExprList1  { $1 }
+
+TyExprList1 :: { [TyExpr] }
+ : TyExpr { [ $1 ] }
+ | TyExpr ',' TyExprList1 { $1 : $3 }
+
+Production :: { Production Expr }
+  : Pattern '=>' Expr { Production $1 $3 }
+
+Pattern :: { Pattern }
+  : uname '(' IdentList ')' { Pattern (NDataCon $1) $3 }
+
+IdentList :: { [NTerm] }
+  :   { [] }
+  | IdentList1 { $1 }
+
+IdentList1 :: { [NTerm] }
+  : lname { [ NTerm $1 ] }
+  | lname ',' IdentList1 { (NTerm $1) : $3 }
+
+TypedIdentList :: { [TypedIdent] }
+  :   { [] }
+  | TypedIdentList1 { $1 }
+
+TypedIdentList1 :: { [TypedIdent] }
+  : TypedIdent { [ $1 ] }
+  | TypedIdent ',' TypedIdentList1 { $1 : $3 }
+
+ProdList :: { [Production Expr] }
+  :   { [] }
+  | ProdList1 { $1 }
+
+ProdList1 :: { [Production Expr] }
+  : Production  { [ $1 ] }
+  | Production '||' ProdList1 { $1 : $3 }
+
+DataAlt :: { DataAlt }
+  : uname '(' TyExprList ')' { DataAlt (NDataCon $1) $3 }
+
+DataAltList :: { [DataAlt] }
+  :   { [] }
+  | DataAltList1 { $1 }
+
+DataAltList1 :: { [DataAlt] }
+  : DataAlt  { [ $1 ] }
+  | DataAlt '||' DataAltList1 { $1 : $3 }
+
+TypedIdent :: { TypedIdent }
+  : lname Typing { TypedIdent (NTerm $1) $2 }
+
+Typing :: { Maybe TyExpr }
+  :   { Nothing }
+  | ':' TyExpr { Just $2 }
+
+{
+
+parseError :: [Token] -> a
+parseError toks = error ("Parse error: " ++ show toks)
+
+testParse :: String -> [Decl]
+testParse = parse . runLex
+
+}

@@ -1,0 +1,23 @@
+func fact (x : Int) = case x <= 0 of
+    {  True()  => 1
+    || False() => x * fact(x - 1) };
+    
+func fibsHelper (acc1 : Int , acc2 : Int, n : Int) : Int =
+  case n <= 0 of
+    { True()  => acc2
+    || False() => fibsHelper(acc2, acc1 + acc2, n - 1)
+    };
+
+func fibs(n : Int) : Int = case n <= 1 of
+  { True()  => 1
+  || False() => fibsHelper(1 , 1, n - 1)
+  };
+
+data List(a) of Nil() || Cons(a, List(a));
+
+func allFibs(start : Int, end : Int) : List(Int) = case end < start of
+  {  True()  => Nil()
+  || False() => Cons(fibs(start), allFibs(start + 1, end))
+  };
+
+func main() = allFibs(0, 10);

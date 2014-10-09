@@ -1,0 +1,12 @@
+data List(a) of Nil() || Cons(a, List(a));
+
+func sum(xs : List(Int)) : Int = case xs of
+  { Nil() => 0 
+  || Cons(y, ys) => y + sum(ys) };
+  
+func append(xs : List(a), ys : List(a)) : List(a) = case xs of
+  {  Nil() => ys
+  || Cons(z,zs) => Cons(z, append(zs,ys))
+  };
+
+func main() : Int = sum(Cons(1,Cons(3,Cons(10,Nil()))));
