@@ -10,7 +10,9 @@ import AST
 
 %name parse
 %tokentype { Token }
-%error { parseError }
+%monad { Alex }
+%lexer { lexwrap } { TokenEOF }
+%error { happyError }
 
 %token
   '('              { Paren L }
@@ -153,10 +155,21 @@ Typing :: { Maybe TyExpr }
 
 {
 
-parseError :: [Token] -> a
-parseError toks = error ("Parse error: " ++ show toks)
+lexwrap :: (Token -> Alex a) -> Alex a
+lexwrap = (alexMonadScan >>=)
+
+happyError :: Token -> Alex a
+happyError tok = do
+  (AlexPn _ l c, _, _, _) <- alexGetInput
+  alexError $ "Line " ++ show l ++ ", column " ++ show c 
+    ++ ": Parse error on Token: " ++ show tok ++ "\n"
+
+parseDecls :: String -> Either String [Decl]
+parseDecls s = runAlex s parse
 
 testParse :: String -> [Decl]
-testParse = parse . runLex
+testParse s = case parseDecls s of
+  Left err -> error err
+  Right x -> x
 
 }

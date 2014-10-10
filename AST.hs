@@ -9,6 +9,12 @@ newtype NDataCon = NDataCon String deriving (Eq, Show, Ord)
 data IntBinOp = Plus | Minus | Times deriving Show
 data IntBinCmp = CmpLT | CmpLEQ | CmpEQ deriving Show
 
+data Express e = I | S | P e e
+
+data Positioned = WP Pos (Express Positioned)
+
+data Pos = Pos
+
 data Expr = EInt Int
   | EStr String
   | EVar String

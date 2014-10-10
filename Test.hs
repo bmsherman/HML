@@ -1,7 +1,6 @@
 module Test where
 
-import Lex (runLex)
-import Parse (parse)
+import Parse (parseDecls)
 
 import AST
 import Eval
@@ -11,10 +10,14 @@ import Data.Maybe (mapMaybe)
 test :: FilePath -> IO (Either String Value)
 test fp = do
   src <- readFile fp
-  let decls = parse (runLex src)
-  let gctxt = makeContext interpreter decls
-  let EvalInterp mainFunc = gctxt M.! (NTerm "main")
-  return $ mainFunc gctxt []
+  return $ case parseDecls src of
+    Left e -> Left e
+    Right decls -> evalMain decls
+
+evalMain :: [Decl] -> Either String Value
+evalMain decls = mainFunc gctxt [] where
+  gctxt = makeContext interpreter decls
+  EvalInterp mainFunc = gctxt M.! (NTerm "main")
 
 makeContext :: Evaluator EvalInterp Value -> [Decl] -> GlobalCtxt
 makeContext (Evaluator primOps compile) = 

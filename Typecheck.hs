@@ -1,5 +1,6 @@
 module Typecheck where
 
+{-
 import AST
 
 import Data.Map (Map)
@@ -123,3 +124,4 @@ uniqueName :: String -> Set String -> String
 uniqueName s set = if s `S.member` set
   then uniqueName (nextName s) set
   else s
+-}
