@@ -114,7 +114,7 @@ caseEval ctxt@(Ctxt lctxt gctxt) val@(VConstrAp dcon vals)
   (Production (Pattern pdcon binders) body : prods) = if dcon == pdcon
     then let newvars = M.fromList (zip binders vals) in
       let lctxt' = M.union newvars lctxt in
-      eval (Ctxt lctxt gctxt) body
+      eval (Ctxt lctxt' gctxt) body
     else caseEval ctxt val prods
 
 {-

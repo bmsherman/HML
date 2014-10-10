@@ -16,7 +16,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Lex, Parse, AST, Eval, Test
+  exposed-modules:     Lex, Parse, AST, Eval, Test, Typecheck
   --, Parse
   -- other-modules:       
   other-extensions:    TemplateHaskell

@@ -20,4 +20,4 @@ func allFibs(start : Int, end : Int) : List(Int) = case end < start of
   || False() => Cons(fibs(start), allFibs(start + 1, end))
   };
 
-func main() = allFibs(0, 10);
+func main() = allFibs(0, 20);
