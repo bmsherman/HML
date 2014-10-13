@@ -4,6 +4,7 @@ import AST
 
 import Control.Applicative ((<$>))
 
+import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 
@@ -11,6 +12,12 @@ data Value = VInt Int
   | VStr String
   | VConstrAp NDataCon [Value]
   deriving Show
+
+pprintV :: Value -> String
+pprintV x = case x of
+  VInt i -> show i
+  VStr s -> show s
+  VConstrAp (NDataCon dcon) vals -> dcon ++ "(" ++ intercalate ", " (map pprintV vals) ++ ")"
 
 
 data Evaluator eval value = Evaluator 
@@ -40,6 +47,7 @@ interpreter = Evaluator
   ops =
     [ (NTerm "+", binOp (+))
     , (NTerm "*", binOp (*))
+    , (NTerm "/", binOp div)
     , (NTerm "-", binOp (-))
     , (NTerm "<", binCmp (<))
     , (NTerm "<=", binCmp (<=))
@@ -91,6 +99,7 @@ interpOp op = case op of
   Plus ->  "_+"
   Minus -> "_-"
   Times -> "_*"
+  Div   -> "_/"
 
 interpCmp :: IntBinCmp -> String
 interpCmp cmp = case cmp of

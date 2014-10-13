@@ -1,12 +1,14 @@
 module AST where
 
+import Data.List (intercalate)
+
 newtype NTerm = NTerm String deriving (Eq, Show, Ord)
 newtype NTyCon = NTyCon String deriving (Eq, Show, Ord)
 newtype NDataCon = NDataCon String deriving (Eq, Show, Ord)
 
 --data TyIdent = TyLit NTyCon | TyVar String deriving Show
 
-data IntBinOp = Plus | Minus | Times deriving Show
+data IntBinOp = Plus | Minus | Times | Div deriving Show
 data IntBinCmp = CmpLT | CmpLEQ | CmpEQ deriving Show
 
 data Express e = I | S | P e e
@@ -31,10 +33,19 @@ data Expr = EInt Int
 
 data CExpr = CLit Lit
   | CVar NTerm
-  | CConstrAp NDataCon [NTerm]
-  | CAp NTerm [NTerm]
+  | CAp String [NTerm]
   | CCase NTerm [Production CExpr]
   | CLet NTerm CExpr CExpr
+
+{-
+toCore :: Expr -> CExpr
+toCore e = case e of
+  EInt i -> CLit (CInt i)
+  EStr s -> CLit (CStr s)
+  EConstrAp (NDataCon dcon) exprs -> CAp dcon (map toCore exprs)
+  EAp (Nterm f) exprs -> CAp f (map toCore exprs)
+  ECase scrut prods -> CLet
+-}
 
 data Lit = CInt Int | CStr String
 
@@ -42,6 +53,14 @@ data TyExpr = IntTy | StrTy
   | TyVar String
   | TAp NTyCon [TyExpr]
   deriving Show
+
+pprintTyExpr :: TyExpr -> String
+pprintTyExpr x = case x of
+  IntTy -> "Int"
+  StrTy -> "String"
+  TyVar s -> s
+  TAp (NTyCon tycon) exprs -> tycon ++ "(" 
+    ++ intercalate ", " (map pprintTyExpr exprs) ++ ")"
 
 data DataDefn = DataDefn [NTerm] [DataAlt]
   deriving Show

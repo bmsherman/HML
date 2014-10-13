@@ -1,0 +1,40 @@
+data Bool() of True() | False();
+data List(a) of Nil() | Cons(a, List(a));
+data And(a, b) of And(a, b);
+
+dealHelper(tf, ls, rs, xs) = case xs of
+  { Nil() => And(ls, rs)
+  | Cons(y, ys) => case tf of
+    { True() => dealHelper(False(), Cons(y, ls), rs, ys)
+    | False() => dealHelper(True(), ls, Cons(y, rs), ys)
+    }
+  };
+
+deal(xs) = dealHelper(True(), Nil(), Nil(), xs);
+
+merge(xs, ys) = case xs of
+  { Nil() => ys
+  | Cons(a, as) => case ys of
+    { Nil() => xs
+    | Cons(b, bs) => case a <= b of
+      { True() => Cons(a, merge(as, ys))
+      | False() => Cons(b, merge(xs, bs))
+      }
+    }
+  };
+
+isSmall(xs) = case xs of
+  { Nil() => True()
+  | Cons(y, ys) => case ys of
+    { Nil() => True()
+    | Cons(z, zs) => False()
+    }
+  };
+
+mergesort(xs) = case isSmall(xs) of 
+  { True() => xs
+  | False() => case deal(xs) of
+    { And(ls, rs) => merge( mergesort(ls) , mergesort(rs) ) }
+  };
+
+main() = mergesort(Cons(13, Cons(5, Cons(2, Cons(10, Cons(3, Nil()))))));

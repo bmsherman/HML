@@ -24,6 +24,7 @@ tokens :-
   "+"                           { lexc $ IntBinOp Plus }
   "-"                           { lexc $ IntBinOp Minus }
   "*"                           { lexc $ IntBinOp Times }
+  "/"                           { lexc $ IntBinOp Div   }
   "~"                           { lexc Negate }
   "=="                          { lexc $ IntBinCmp CmpEQ }
   "<="                          { lexc $ IntBinCmp CmpLEQ }
@@ -38,11 +39,10 @@ tokens :-
   \]                            { lexc $ Bracket R }
   \{                            { lexc $ Brace L }
   \}                            { lexc $ Brace R }
-  "||"                          { lexc Or }
+  "|"                           { lexc Or }
   "=>"                          { lexc To }
   \" ([^\"])* \"                { lex String }
   "data"                        { lexc Data }
-  "func"                        { lexc Func }
   "case"                        { lexc Case }
   "of"                          { lexc Of }
   "let"                         { lexc Let }
@@ -59,7 +59,7 @@ data Token =
   | UName String
   | Paren Side | Bracket Side | Brace Side
   | Colon | Comma | Semi
-  | Or | To | Data | Func | Case | Of | Let | In
+  | Or | To | Data | Case | Of | Let | In
   | Seq
   | IntBinOp IntBinOp
   | IntBinCmp IntBinCmp

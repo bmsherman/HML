@@ -19,24 +19,24 @@ import AST
   ')'              { Paren R }
   '{'              { Brace L }
   '}'              { Brace R }
-  '['              { Bracket L }
-  ']'              { Bracket R }
+--  '['              { Bracket L }
+--  ']'              { Bracket R }
   ':'              { Colon }
   ','              { Comma }
   ';'              { Semi }
   '+'              { IntBinOp Plus }
   '-'              { IntBinOp Minus }
   '*'              { IntBinOp Times }
+  '/'              { IntBinOp Div   }
   intbincmp        { IntBinCmp $$ }
   '~'              { Negate }
-  '||'             { Or }
+  '|'              { Or }
   '=>'             { To }
   '>>'             { Seq }
   int              { Int $$ }
   string           { String $$ }
   '='              { Equals  }
   data             { Data }
-  func             { Func }
   case             { Case }
   of               { Of   }
   let              { Let  }
@@ -46,13 +46,16 @@ import AST
   uname            { UName $$ }
   lname            { LName $$ }
 
-%right '||'
+%right '|'
+%right in
+%left ':'
 %right '>>'
 %right ','
 %nonassoc '='
 %nonassoc intbincmp
 %left '+' '-'
-%left '*' 
+%left '*' '/'
+%right '~'
 
 %%
 
@@ -63,8 +66,8 @@ DeclList :: { [Decl] }
 Decl :: { Decl }
   : data uname '(' IdentList ')' of DataAltList 
      { DataDecl (NTyCon $2) (DataDefn $4 $7) }
-  | func lname '(' TypedIdentList ')' Typing '=' Expr
-     { FuncDecl (NTerm $2) (FuncDefn $4 $6 $8) }
+  | lname '(' TypedIdentList ')' Typing '=' Expr
+     { FuncDecl (NTerm $1) (FuncDefn $3 $5 $7) }
 
 Expr :: { Expr }
   : int { EInt $1 }
@@ -77,6 +80,7 @@ Expr :: { Expr }
   | Expr '+' Expr { EIntBinOp Plus $1 $3 }
   | Expr '-' Expr { EIntBinOp Minus $1 $3 }
   | Expr '*' Expr { EIntBinOp Times $1 $3 }
+  | Expr '/' Expr { EIntBinOp Div   $1 $3 }
   | Expr intbincmp Expr { EIntBinCmp $2 $1 $3 }
   | '~' Expr { ENegate $2 }
   | Expr '>>' Expr { ESeq $1 $3 }
@@ -133,7 +137,7 @@ ProdList :: { [Production Expr] }
 
 ProdList1 :: { [Production Expr] }
   : Production  { [ $1 ] }
-  | Production '||' ProdList1 { $1 : $3 }
+  | Production '|' ProdList1 { $1 : $3 }
 
 DataAlt :: { DataAlt }
   : uname '(' TyExprList ')' { DataAlt (NDataCon $1) $3 }
@@ -144,7 +148,7 @@ DataAltList :: { [DataAlt] }
 
 DataAltList1 :: { [DataAlt] }
   : DataAlt  { [ $1 ] }
-  | DataAlt '||' DataAltList1 { $1 : $3 }
+  | DataAlt '|' DataAltList1 { $1 : $3 }
 
 TypedIdent :: { TypedIdent }
   : lname Typing { TypedIdent (NTerm $1) $2 }
