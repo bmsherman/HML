@@ -2,14 +2,15 @@
 
 module Parse where
 
-import Control.Monad (liftM)
+import Control.Applicative ((<$>))
+import Control.Arrow (left)
+import Control.Monad (liftM, liftM2)
 
 import Data.Char (toLower)
+import Data.List (intercalate)
 import Lex
 import AST
 import TypeCheck
-
-import Debug.Trace
 
 }
 
@@ -166,36 +167,40 @@ Typing :: { Maybe TyExpr }
 processDecl :: Decl -> Alex Decl
 processDecl d = do
   ctxt <- alexGetUserState
-  traceShow d True `seq` return ()
+  --traceShow d True `seq` return ()
   dctxt <- eToA $ case d of
-    DataDecl tycon datadef ->
+    DataDecl tycon@(NTyCon tyN) datadef ->
       fmap dataDefCtxt (elabDataDef tycon datadef)
-    FuncDecl n funcDef ->
-      funcCtxt ctxt n funcDef
+    FuncDecl n@(NTerm nt) funcDef ->
+      left (\x -> ["In function declaration '" ++ nt ++ "', " ++ x]) 
+        $ funcCtxt ctxt n funcDef
   ctxt' <- eToA $ unionC ctxt dctxt
   alexSetUserState ctxt'
   return d
   where
-  eToA (Left x) = lineError x
+  eToA (Left xs) = do
+    prefix <- prefixPos
+    alexError $ intercalate "\n" [ prefix ++ ": " ++ x | x <- xs ]
   eToA (Right y) = return y
 
 lexwrap :: (Token -> Alex a) -> Alex a
 lexwrap = (alexMonadScan >>=)
 
+prefixPos :: Alex String
+prefixPos = do
+  (AlexPn _ l c, _, _, _) <- alexGetInput
+  return $ "Line " ++ show l ++ ", column " ++ show c
+
 lineError :: String -> Alex a
 lineError s = do
-  (AlexPn _ l c, _, _, _) <- alexGetInput
-  alexError $ "Line " ++ show l ++ ", column " ++ show c ++ ": " ++ s
+  prefix <- prefixPos
+  alexError $ prefix ++ ": " ++ s
 
 happyError :: Token -> Alex a
-happyError tok = lineError ("Parse error on Token: " ++ show tok ++ "\n")
+happyError tok = lineError ("Parse error on token: '" ++ show tok ++ "'")
 
-parseDecls :: String -> Either String [Decl]
-parseDecls s = fmap reverse $ runAlex s parse
-
-testParse :: String -> [Decl]
-testParse s = case parseDecls s of
-  Left err -> error err
-  Right x -> x
+parseDecls :: String -> Either String ([Decl], Context)
+parseDecls s = runAlex s $
+  liftM2 (,) (liftM reverse parse) alexGetUserState
 
 }

@@ -66,7 +66,39 @@ data Token =
   | Negate
   | Equals
   | TokenEOF
-  deriving Show
+
+instance Show Token where
+  show t = case t of
+    Int i -> show i
+    String s -> show s
+    LName s -> s
+    UName s -> s
+    Paren L -> "("
+    Paren R -> ")"
+    Brace L -> "{"
+    Brace R -> "}"
+    Brace R -> "}"
+    Colon -> ":"
+    Comma -> ","
+    Semi -> ";"
+    Or -> "|"
+    To -> "=>"
+    Data -> "data"
+    Case -> "case"
+    Of -> "of"
+    Let -> "let"
+    In -> "in"
+    Seq -> ">>"
+    Negate -> "~"
+    Equals -> "="
+    TokenEOF -> "EOF"
+    IntBinOp Plus -> "+"
+    IntBinOp Minus -> "-"
+    IntBinOp Times -> "*"
+    IntBinOp Div -> "/"
+    IntBinCmp CmpLT -> "<"
+    IntBinCmp CmpLEQ -> "<="
+    IntBinCmp CmpEQ -> "=="
 
 alexEOF = return TokenEOF
 

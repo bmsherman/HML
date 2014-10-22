@@ -18,22 +18,20 @@ import Data.Maybe (mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as S
 
-import Debug.Trace (trace, traceShow)
-
 type Arity = Int
 
 data Error = DataDeclScopeError NTyCon NDataCon
-  | DuplicateDefinition String
   deriving Show
 
 -- elaborate data declaration
-elabDataDef :: NTyCon -> DataDefn -> Either String DataDef
+elabDataDef :: NTyCon -> DataDefn -> Either [String] DataDef
 elabDataDef tyN@(NTyCon tyName) (DataDefn vars dataAlts) = 
-  case [ DataDeclScopeError tyN dN
-       | DataAlt dN exprs <- dataAlts, e <- exprs
-       , not (S.null (freeVarsQ (Q varSet e))) ] of
+  case [ "In data declaration " ++ tyName ++ ", in data constructor "
+         ++ dN ++ ", type variable '" ++ tyVar ++ "' not in scope."
+       | DataAlt (NDataCon dN) exprs <- dataAlts, e <- exprs
+       , tyVar <- S.toList (freeVarsQ (Q varSet e)) ] of
     [] -> Right (DataDef tyName vars' dataAlts)
-    errs -> Left (show errs)
+    errs -> Left errs
   where
   vars' = map (\(NTerm n) -> n) vars
   varSet = S.fromList vars'
@@ -78,16 +76,16 @@ pprintContext (Context ts fs tycs) = intercalate "\n"
     "(" ++ intercalate ", " (take arity (map (:[]) ['a'..])) ++ ")"
   ppQuantified vars = "" --"For all " ++ concatMap (++ ", ") (S.toList vars)
 
-unionC :: Context -> Context -> Either String Context
+unionC :: Context -> Context -> Either [String] Context
 unionC (Context a b c) (Context a' b' c') = if M.null iAll
   then Right $ Context (M.union a a') (M.union b b') (M.union c c')
-  else Left (show (M.elems iAll))
+  else Left (M.elems iAll)
   where
   ia = M.intersectionWithKey err a a'
   ib = M.intersectionWithKey err b b'
   ic = M.intersectionWithKey err c c'
   iAll = M.unions [ia, ib, ic]
-  err key _ _ = DuplicateDefinition key
+  err key _ _ = "Duplicate definition for name '" ++ key ++ "'"
 
 data Inj = Func | DataCon deriving Show
 
@@ -126,14 +124,22 @@ evalTy ty = do
   (TIState _ subst) <- lift get
   return (apply subst ty)
 
+plural :: Int -> String -> String
+plural 1 s = s
+plural n s = s ++ "s"
+
 union :: TyExpr -> TyExpr -> TypeCheck TyExpr
 union (TAp tcon1@(NTyCon n1) e1s) (TAp tcon2@(NTyCon n2) e2s) = if tcon1 == tcon2
   then do
-    let Right unionOps = strictZipWith union e1s e2s
+    unionOps <- hoistEither $ case strictZipWith union e1s e2s of
+      Right uO -> Right uO
+      Left (i, j) -> Left $ "Type constructor '" ++ n1 ++ "' expected "
+        ++ show i ++ " " ++ plural i "type argument"
+        ++ " but was given " ++ show j ++ "."
     argTys <- sequence unionOps
     return (TAp tcon1 argTys)
-  else hoistEither $ Left ("Type constructors " ++ n1 ++ " and "
-        ++ n2 ++ " don't match")
+  else hoistEither $ Left ("Expected type constructor " ++ n1 
+        ++ " but was given " ++ n2)
 union (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
   then varBind t (TyVar u)
   else varBind u (TyVar t)
@@ -141,21 +147,21 @@ union (TyVar u) t = varBind u t
 union t (TyVar u) = varBind u t
 union IntTy IntTy = return IntTy
 union StrTy StrTy = return StrTy
-union t1 t2 = hoistEither $ Left ("Can't match type " ++ show t1
-  ++ " with " ++ show t2)
+union t1 t2 = hoistEither $ Left ("Can't match expected type " 
+  ++ pprintTyExpr t1
+  ++ " with actual type " ++ pprintTyExpr t2)
 
 varBind :: TyVar -> TyExpr -> TypeCheck TyExpr
-varBind u t | traceShow u False = undefined
 varBind u@(TV flex name) t = case t of
   TyVar u' | u == u' -> return t
   --IntTy -> primErr "Int"
   --StrTy -> primErr "String"
   _ | S.member name (freeVars t) -> hoistEither
     $ Left ("Occurs check error: unifying type variable " ++ name ++ 
-        "with type " ++ show t ++ " would lead to infinite type")
+        " with type " ++ pprintTyExpr t ++ " would lead to infinite type")
   _ | flex == Rigid -> hoistEither
-    $ Left ("Cannot match rigid type variable " ++ name ++ " with type "
-        ++ show t)
+    $ Left ("Cannot match rigid type variable '" ++ name ++ "' with type "
+        ++ pprintTyExpr t)
   _ -> do
       addSubst name t
       return t
@@ -202,19 +208,17 @@ ti ctxt e = case e of
   EInt _ -> return IntTy
   EStr _ -> return StrTy
   EVar vname -> case M.lookup vname (terms ctxt) of
-    Nothing -> hoistEither $ Left ("Variable " ++ vname ++ " not in scope")
+    Nothing -> hoistEither $ Left ("Variable '" ++ vname ++ "' not in scope")
     Just scheme -> do
       ty <- instantiateE scheme
       return ty
   EConstrAp (NDataCon dcon) exprs -> 
     ti ctxt (EAp (NTerm dcon) exprs)
   EAp (NTerm fname) exprs -> case M.lookup fname (funcs ctxt) of
-    Nothing -> hoistEither $ Left ("Function " ++ fname ++ " not in scope")
+    Nothing -> hoistEither $ Left ("Function '" ++ fname ++ "' not in scope")
     Just (_, scheme) -> do
       (argTys, retTy) <- instantiateFunc scheme
       argTys2 <- mapM (ti ctxt) exprs
-      trace ("argTys: " ++ show argTys ++ "\nargTys2: " ++ show argTys2)
-        True `seq` return ()
       case strictZipWith union' argTys argTys2 of
         Left (i, j) -> hoistEither $ Left ("Function " ++ fname ++ " has " ++ show i
           ++ " arguments, but received " ++ show j)
@@ -235,13 +239,12 @@ ti ctxt e = case e of
   ENegate e -> ti ctxt (EAp (NTerm "negate") [e])
   Typed e ty -> do
     ty' <- ti ctxt e
-    union' ty' ty
+    union' ty ty'
 
 tiCase :: Context -> TyExpr -> Production Expr 
        -> TypeCheck (TyExpr, TyExpr)
 tiCase ctxt ety 
   (Production (Pattern (NDataCon dcon) argNames) outExpr) = 
-    trace ("scrut type:" ++ show ety) True `seq`
     case M.lookup dcon (funcs ctxt) of
       Nothing -> hoistEither $ Left ("Data constructor " ++ dcon ++
         " not in scope")
@@ -264,8 +267,7 @@ tiCase ctxt ety
 
 funcCtxt :: Context -> NTerm -> FuncDefn -> Either String Context
 funcCtxt ctxt fname@(NTerm fn) fdef = 
-  let ans = fmap f (elabFunction ctxt fname fdef) in
-  traceShow ans True `seq` ans
+  fmap f (elabFunction ctxt fname fdef)
   where
   f :: Quantified ([TyExpr], TyExpr) -> Context
   f ty = Context M.empty (M.singleton fn (Func, ty)) M.empty
@@ -283,9 +285,10 @@ generalize (argTys, retTy) = Q vars (argTys, retTy) where
 funcTyVars :: FuncDefn -> Either String (Set String)
 funcTyVars (FuncDefn args retTy e) = if S.null freeVarsInE
   then Right vars
-  else Left ("Type variables " ++ show freeVarsInE ++ " not in scope")
+  else Left (plural (S.size freeVarsInE) "Type variable" ++ " " ++ showV freeVarsInE ++ " not in scope")
   where
   vars = S.unions (map freeVarsM (retTy : map getArgTy args))
+  showV = intercalate ", " . map (\x -> "'" ++ x ++ "'") . S.toList
   freeVarsInE = freeTyVars e S.\\ vars
   freeVarsM Nothing = S.empty
   freeVarsM (Just ty) = freeVars ty

@@ -14,9 +14,7 @@ import Data.List (find)
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
 
-import Debug.Trace (traceShow)
-
-test :: FilePath -> IO (Either String [Decl])
+test :: FilePath -> IO (Either String ([Decl], Context))
 test fp = do
   src <- readFile fp
   return (parseDecls src)
@@ -36,6 +34,7 @@ makeContext (Evaluator primOps compile) =
   prims = M.mapKeys (\(NTerm x) -> NTerm ('_' : x)) primOps
 
 
+{-
 makeTyCtxt :: [Decl] -> Either String Context
 makeTyCtxt decls = do
   ctxt <- foldM unionC primContext (mapMaybe getData decls)
@@ -55,27 +54,11 @@ makeTyCtxt decls = do
     go ctxt' defs
   eToM (Right x) = Just x
   eToM (Left _) = Nothing
+-}
   
 
 tyCheckTest :: Expr -> (Either String TyExpr, TIState)
 tyCheckTest e = runTypeCheck (evalTy =<< ti primContext e)
-
---tyCheckMain :: [Decl] -> (Either String TyExpr, TIState)
-tyCheckMain decls = traceShow (mapMaybe g decls) True `seq`
-  runTypeCheck (tiFunc ctxt mainN mainF)
-  where
-  ((mainN, mainF):_) = mapMaybe getMain decls
-  Right ctxt = foldM unionC primContext (mapMaybe f decls)
-  g (DataDecl tycon datadef) =
-    Just (elabDataDef tycon datadef)
-  g _ = Nothing
-  f (DataDecl tycon datadef) =
-    fmap dataDefCtxt (eToM (elabDataDef tycon datadef))
-  f _ = Nothing
-  getMain (FuncDecl n@(NTerm "main") funcDef) = Just (n, funcDef)
-  getMain _ = Nothing
-  eToM (Right x) = Just x
-  eToM (Left _) = Nothing
 
 myExpr :: Expr
 myExpr = EAp (NTerm "_+") [EInt 10, EInt 20]

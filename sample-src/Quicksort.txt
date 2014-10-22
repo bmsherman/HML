@@ -5,14 +5,14 @@ data And(a, b) of And(a, b);
 partition(k, xs) = case xs
   { Nil() => And(Nil(), Nil())
   | Cons(y, ys) => case partition(k, ys)
-    { And(as, bs) => case y <= k 
+    { And(as, bs) => case y <= k
       { True() => And(Cons(y, as), bs)
       | False() => And(as, Cons(y, bs))
       }
     }
   };
 
-append(xs,  ys : List(b)) : List(b) = case xs : List(b)
+append(xs,  ys : List(a)) = case xs : List(a)
   { Nil() => ys
   | Cons(z, zs) => Cons(z, append(zs,ys))
   };
@@ -26,4 +26,3 @@ quicksort(xs) = case xs
 
 main() = quicksort(Cons(13, Cons(5, Cons(2, Cons(10, Cons(3, Nil()))))));
 
-main() = 1;
