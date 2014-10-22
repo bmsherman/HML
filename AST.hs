@@ -6,16 +6,8 @@ newtype NTerm = NTerm String deriving (Eq, Show, Ord)
 newtype NTyCon = NTyCon String deriving (Eq, Show, Ord)
 newtype NDataCon = NDataCon String deriving (Eq, Show, Ord)
 
---data TyIdent = TyLit NTyCon | TyVar String deriving Show
-
 data IntBinOp = Plus | Minus | Times | Div deriving Show
 data IntBinCmp = CmpLT | CmpLEQ | CmpEQ deriving Show
-
-data Express e = I | S | P e e
-
-data Positioned = WP Pos (Express Positioned)
-
-data Pos = Pos
 
 data Expr = EInt Int
   | EStr String
@@ -37,6 +29,7 @@ data CExpr = CLit Lit
   | CCase NTerm [Production CExpr]
   | CLet NTerm CExpr CExpr
 
+
 {-
 toCore :: Expr -> CExpr
 toCore e = case e of
@@ -50,15 +43,19 @@ toCore e = case e of
 data Lit = CInt Int | CStr String
 
 data TyExpr = IntTy | StrTy
-  | TyVar String
+  | TyVar TyVar
   | TAp NTyCon [TyExpr]
   deriving Show
+
+data TyVar = TV Flex String deriving (Eq, Show)
+
+data Flex = Flex | Rigid deriving (Eq, Show)
 
 pprintTyExpr :: TyExpr -> String
 pprintTyExpr x = case x of
   IntTy -> "Int"
   StrTy -> "String"
-  TyVar s -> s
+  TyVar (TV _ s) -> s
   TAp (NTyCon tycon) exprs -> tycon ++ "(" 
     ++ intercalate ", " (map pprintTyExpr exprs) ++ ")"
 
@@ -82,3 +79,4 @@ data Production e = Production Pattern e
 
 data Pattern = Pattern NDataCon [NTerm]
   deriving Show
+

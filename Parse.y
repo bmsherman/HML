@@ -2,9 +2,14 @@
 
 module Parse where
 
+import Control.Monad (liftM)
+
 import Data.Char (toLower)
 import Lex
 import AST
+import TypeCheck
+
+import Debug.Trace
 
 }
 
@@ -19,8 +24,6 @@ import AST
   ')'              { Paren R }
   '{'              { Brace L }
   '}'              { Brace R }
---  '['              { Bracket L }
---  ']'              { Bracket R }
   ':'              { Colon }
   ','              { Comma }
   ';'              { Semi }
@@ -60,8 +63,8 @@ import AST
 %%
 
 DeclList :: { [Decl] }
-  : { [ ] }
-  | Decl ';' DeclList { $1 : $3 }
+  : { [] }
+  | DeclList Decl ';' {% liftM (: $1) (processDecl $2)  }
 
 Decl :: { Decl }
   : data uname '(' IdentList ')' of DataAltList 
@@ -75,7 +78,7 @@ Expr :: { Expr }
   | lname { EVar $1 }
   | uname '(' ExprList ')' { EConstrAp (NDataCon $1) $3 }
   | lname '(' ExprList ')' { EAp (NTerm $1) $3 }
-  | case Expr of '{' ProdList '}' { ECase $2 $5 }
+  | case Expr '{' ProdList '}' { ECase $2 $4 }
   | let TypedIdent '=' Expr in Expr { ELet $2 $4 $6 }
   | Expr '+' Expr { EIntBinOp Plus $1 $3 }
   | Expr '-' Expr { EIntBinOp Minus $1 $3 }
@@ -98,7 +101,7 @@ ExprList1 :: { [Expr] }
 TyExpr :: { TyExpr }
   : intty { IntTy }
   | strty { StrTy }
-  | lname { TyVar $1 }
+  | lname { TyVar (TV Flex $1) }
   | uname '(' TyExprList ')' { TAp (NTyCon $1) $3 }
 
 TyExprList :: { [TyExpr] }
@@ -159,17 +162,36 @@ Typing :: { Maybe TyExpr }
 
 {
 
+
+processDecl :: Decl -> Alex Decl
+processDecl d = do
+  ctxt <- alexGetUserState
+  traceShow d True `seq` return ()
+  dctxt <- eToA $ case d of
+    DataDecl tycon datadef ->
+      fmap dataDefCtxt (elabDataDef tycon datadef)
+    FuncDecl n funcDef ->
+      funcCtxt ctxt n funcDef
+  ctxt' <- eToA $ unionC ctxt dctxt
+  alexSetUserState ctxt'
+  return d
+  where
+  eToA (Left x) = lineError x
+  eToA (Right y) = return y
+
 lexwrap :: (Token -> Alex a) -> Alex a
 lexwrap = (alexMonadScan >>=)
 
-happyError :: Token -> Alex a
-happyError tok = do
+lineError :: String -> Alex a
+lineError s = do
   (AlexPn _ l c, _, _, _) <- alexGetInput
-  alexError $ "Line " ++ show l ++ ", column " ++ show c 
-    ++ ": Parse error on Token: " ++ show tok ++ "\n"
+  alexError $ "Line " ++ show l ++ ", column " ++ show c ++ ": " ++ s
+
+happyError :: Token -> Alex a
+happyError tok = lineError ("Parse error on Token: " ++ show tok ++ "\n")
 
 parseDecls :: String -> Either String [Decl]
-parseDecls s = runAlex s parse
+parseDecls s = fmap reverse $ runAlex s parse
 
 testParse :: String -> [Decl]
 testParse s = case parseDecls s of

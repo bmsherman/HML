@@ -2,26 +2,28 @@ data Bool() of True() | False();
 data List(a) of Nil() | Cons(a, List(a));
 data And(a, b) of And(a, b);
 
-partition(k, xs) = case xs of
+partition(k, xs) = case xs
   { Nil() => And(Nil(), Nil())
-  | Cons(y, ys) => case partition(k, ys) of
-    { And(as, bs) => case y <= k of
+  | Cons(y, ys) => case partition(k, ys)
+    { And(as, bs) => case y <= k 
       { True() => And(Cons(y, as), bs)
       | False() => And(as, Cons(y, bs))
       }
     }
   };
 
-append(xs, ys) = case xs of
+append(xs,  ys : List(b)) : List(b) = case xs : List(b)
   { Nil() => ys
   | Cons(z, zs) => Cons(z, append(zs,ys))
   };
 
-quicksort(xs) = case xs of
+quicksort(xs) = case xs
   { Nil() => Nil()
-  | Cons(y, ys) => case partition(y, ys) of
+  | Cons(y, ys) => case partition(y, ys)
     { And(ls, rs) => append(quicksort(ls), Cons(y, quicksort(rs))) }
   };
 
 
 main() = quicksort(Cons(13, Cons(5, Cons(2, Cons(10, Cons(3, Nil()))))));
+
+main() = 1;

@@ -27,10 +27,11 @@ primOps = M.unions [intBinOps ,neg, intCmpOps ]
   where
   neg = M.fromList [("_negate", (Func, Q S.empty ([IntTy], IntTy)))]
   ident = M.fromList
-    [ ("_id", (Func, Q (S.singleton "a") ([TyVar "a"], TyVar "a")))
+    [ ("_id", (Func, Q (S.singleton "a") ([tyVar "a"], tyVar "a")))
     , ("_id2", (Func, Q (S.fromList ["a", "b"]) 
-         ([TyVar "a", TyVar "b"], TyVar "b")))
+         ([tyVar "a", tyVar "b"], tyVar "b")))
     ]
+  tyVar = TyVar . TV Flex
 
 primContext :: Context
 primContext = Context M.empty primOps M.empty

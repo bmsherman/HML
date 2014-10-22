@@ -3,10 +3,12 @@
 module Lex where
 
 import AST (IntBinOp (..), IntBinCmp (..))
+import Primitives (primContext)
+import TypeCheck (Context)
 import Prelude hiding (lex)
 }
 
-%wrapper "monad"
+%wrapper "monadUserState"
 
 $digit = 0-9
 $lower = [a-z]
@@ -35,8 +37,6 @@ tokens :-
   \,                            { lexc Comma }
   \(                            { lexc $ Paren L }
   \)                            { lexc $ Paren R }
-  \[                            { lexc $ Bracket L }
-  \]                            { lexc $ Bracket R }
   \{                            { lexc $ Brace L }
   \}                            { lexc $ Brace R }
   "|"                           { lexc Or }
@@ -57,7 +57,7 @@ data Token =
   | String String
   | LName String
   | UName String
-  | Paren Side | Bracket Side | Brace Side
+  | Paren Side | Brace Side
   | Colon | Comma | Semi
   | Or | To | Data | Case | Of | Let | In
   | Seq
@@ -77,5 +77,10 @@ lexc :: a -> AlexAction a
 lexc = lex . const
 
 data Side = L | R deriving Show
+
+type AlexUserState = Context
+
+alexInitUserState :: AlexUserState
+alexInitUserState = primContext
 
 }  
