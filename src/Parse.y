@@ -175,7 +175,9 @@ processDecl d = do
   (ctxt, errors) <- alexGetUserState
   let result = (unionC ctxt =<<) $ case d of
 	DataDecl tycon@(NTyCon tyN) datadef ->
-	  fmap dataDefCtxt (elabDataDef tycon datadef)
+	  left (map (\x -> "In data declaration '" ++ tyN ++ "', " ++ x) ) $
+            dataDefCtxt (tycons ctxt)
+              =<< elabDataDef tycon datadef
 	FuncDecl n@(NTerm nt) funcDef ->
 	  left (:[]) 
 	    $ funcCtxt ctxt n funcDef
@@ -196,13 +198,10 @@ prefixPos = do
   (AlexPn _ l c, _, _, _) <- alexGetInput
   return $ "Line " ++ show l ++ ", column " ++ show c
 
-lineError :: String -> Alex a
-lineError s = do
-  prefix <- prefixPos
-  alexError $ prefix ++ ": " ++ s
-
 happyError :: Token -> Alex a
-happyError tok = lineError ("Parse error on token: '" ++ show tok ++ "'")
+happyError tok = do
+  prefix <- prefixPos
+  alexError $ prefix ++ ": " ++ "Parse error on token: '" ++ show tok ++ "'"
 
 parseDecls :: Context -> String -> Either String ([Decl], (Context, [String]))
 parseDecls ctxt s = runAlex s $ do

@@ -1,0 +1,8 @@
+data Either(a, b) of Left(Either(a)) | Right(b, Either(b));
+
+data Maybe(a) of Just(a) | Nothing();
+
+test(x : Bool()) : Maybe(Int) = case x
+  { True() => Just(3) : Maybe(Int, Int)
+  | False() => Nothing()
+  };

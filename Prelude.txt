@@ -3,19 +3,19 @@ data Unit() of Unit();
 
 seq(x, y) = y;
 
--- Arrays
-data Array(a) of NewArray(Int, a);
+undefined() = case 0 {};
 
-makeArray(size : Int, defaultVal : a) : Array(a) = 
-  NewArray(size, defaultVal);
+-- Arrays
+data Array(a) of ;
+
+makeArray(size : Int, defaultVal : a) : Array(a) = undefined();
 
 set(arr : Array(a), pos : Int, val : a) : Unit() = Unit();
 
-get(arr : Array(a), pos : Int) : a = case arr
-  { NewArray(size, defaultVal) => defaultVal };
+get(arr : Array(a), pos : Int) : a = undefined();
 
 
 -- IO 
 out_string(x : String) : Int = 0;
 out_int(x : Int) : Int = 0;
-in_int() : Int = 42;
+in_int() : Int = undefined();

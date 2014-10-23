@@ -4,8 +4,8 @@ module Typecheck where
 import AST
 
 import Control.Applicative ((<$>), (<|>))
-import Control.Arrow (second)
-import Control.Monad (foldM, zipWithM, guard)
+import Control.Arrow (second, left)
+import Control.Monad (foldM, zipWithM, guard, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (State, put, get, runState)
 import Control.Monad.Trans.Either (EitherT, hoistEither, runEitherT)
@@ -20,7 +20,7 @@ import qualified Data.Set as S
 -- elaborate data declaration
 elabDataDef :: NTyCon -> DataDefn -> Either [String] DataDef
 elabDataDef (NTyCon tyName) (DataDefn vars dataAlts) = 
-  case [ "In data declaration " ++ tyName ++ ", in data constructor "
+  case [ "in data constructor "
          ++ dN ++ ", type variable '" ++ tyVar ++ "' not in scope."
        | DataAlt (NDataCon dN) exprs <- dataAlts, e <- exprs
        , tyVar <- S.toList (freeVarsQ (Q varSet e)) ] of
@@ -32,10 +32,20 @@ elabDataDef (NTyCon tyName) (DataDefn vars dataAlts) =
 
 data DataDef = DataDef String [String] [DataAlt] deriving Show
 
-dataDefCtxt :: DataDef -> Context
-dataDefCtxt (DataDef tyName vars dataAlts) = 
-  (Context M.empty funcs (M.singleton tyName arity))
+dataDefCtxt :: Map String Arity -> DataDef 
+  -> Either [String] Context
+dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
+  mLefts  [ left (("in data constructor '" ++ dcon ++ "', ") ++) 
+             $ kindCheck tycs' e
+             | DataAlt (NDataCon dcon) es <- dataAlts, e <- es ]
+  return (Context M.empty funcs (M.singleton tyName arity))
   where
+  mLefts = go [] where
+    go acc [] = if null acc then Right () else Left (reverse acc)
+    go acc (x : xs) = case x of
+      Left l -> go (l : acc) xs
+      Right _ -> go acc xs
+  tycs' = M.insert tyName arity tycs
   arity = S.size varSet
   varSet = S.fromList vars
   funcs = M.fromList [ (dcon, (DataCon, Q varSet (x, tyExpr)))
@@ -55,6 +65,18 @@ emptyContext = Context M.empty M.empty M.empty
 
 instance Show Context where
   show = pprintContext
+
+kindCheck :: Map String Arity -> TyExpr -> Either String ()
+kindCheck tycs ty = case ty of
+  TAp (NTyCon tcon) es -> case M.lookup tcon tycs of
+    Nothing -> Left $ "type constructor '" ++ tcon ++ "' not in scope"
+    Just arity -> let l = length es in if l == arity
+      then zipWithM_ (\i -> left (("in argument " ++ show i ++ 
+           " of type constructor '" ++ tcon ++ "', ") ++) . kindCheck tycs) 
+           [1..] es
+      else Left $ "type constructor '" ++ tcon ++ "' expects " ++ show arity
+        ++ plural arity " argument" ++ " but received " ++ show l
+  _ -> Right ()
 
 pprintContext :: Context -> String
 pprintContext (Context ts fs tycs) = intercalate "\n" 
@@ -136,15 +158,15 @@ union fail ty1@(TAp tcon1@(NTyCon n1) e1s)
   then do
     unionOps <- case strictZipWith (union fail') e1s e2s of
       Right uO -> return uO
-      Left (i, j) -> fail' $ "Type constructor '" ++ n1 ++ "' expected "
+      Left (i, j) -> fail' $ "type constructor '" ++ n1 ++ "' expected "
         ++ show i ++ " " ++ plural i "type argument"
         ++ " but was given " ++ show j ++ "."
     argTys <- sequence unionOps
     return (TAp tcon1 argTys)
-  else fail' ("Expected type constructor " ++ n1 
+  else fail' ("expected type constructor " ++ n1 
         ++ " but was given " ++ n2)
   where
-  fail' = appFail fail ("Can't match expected type " ++ pprintTyExpr ty1
+  fail' = appFail fail ("can't match expected type " ++ pprintTyExpr ty1
     ++ " with actual type " ++ pprintTyExpr ty2 ++ ", specifically, ")
 union fail (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
   then varBind fail t (TyVar u)
@@ -153,7 +175,7 @@ union fail (TyVar u) t = varBind fail u t
 union fail t (TyVar u) = varBind fail u t
 union _ IntTy IntTy = return IntTy
 union _ StrTy StrTy = return StrTy
-union fail t1 t2 = fail ("Can't match expected type " 
+union fail t1 t2 = fail ("can't match expected type " 
   ++ pprintTyExpr t1
   ++ " with actual type " ++ pprintTyExpr t2)
 
@@ -162,10 +184,10 @@ varBind :: FailCont
 varBind fail u@(TV flex name) t = case t of
   TyVar u' | u == u' -> return t
   _ | S.member name (freeVars t) -> fail
-      ("Occurs check error: unifying type variable '" ++ name ++ 
+      ("occurs check error: unifying type variable '" ++ name ++ 
         "' with type " ++ pprintTyExpr t ++ " would lead to infinite type")
   _ | flex == Rigid -> fail
-    ("Cannot match rigid type variable '" ++ name ++ "' with type "
+    ("cannot match rigid type variable '" ++ name ++ "' with type "
         ++ pprintTyExpr t)
   _ -> do
       addSubst name t
@@ -213,43 +235,48 @@ ti fail ctxt e = case e of
   EInt _ -> return IntTy
   EStr _ -> return StrTy
   EVar vname -> case M.lookup vname (terms ctxt) of
-    Nothing -> fail ("Variable '" ++ vname ++ "' not in scope")
+    Nothing -> fail ("variable '" ++ vname ++ "' not in scope")
     Just scheme -> do
       ty <- instantiateE scheme
       return ty
   EAp inj fname exprs -> case M.lookup fname (funcs ctxt) of
-    Nothing -> fail ("Function '" ++ fname ++ "' not in scope")
+    Nothing -> fail ("function '" ++ fname ++ "' not in scope")
     Just (_, scheme) -> do
       (argTys, retTy) <- instantiateFunc scheme
       argTys2 <- zipWithM (\i -> ti (failF fname i) ctxt) 
          [1 :: Int ..] exprs
       case strictZipWith (unionF fname) (zip [1..] argTys) argTys2 of
-        Left (i, j) -> fail ("Function " ++ fname ++ " expects " ++ show i
+        Left (i, j) -> fail ("function " ++ fname ++ " expects " ++ show i
           ++ " arguments, but received " ++ show j)
         Right toUnion -> sequence toUnion
       return retTy
-  ELet (TypedIdent (NTerm name) _) assn expr -> do
-    assnTy <- ti (appFail fail ("In let-expression assignment for variable '"
-         ++ name ++ "', ")) ctxt assn
+  ELet (TypedIdent (NTerm name) mty) assn expr -> do
+    assnTy <- ti (appFail fail ("in let-expression assignment for variable '"
+         ++ name ++ "', ")) ctxt $ case mty of
+           Nothing -> assn
+           Just ty -> Typed assn ty
     ti fail (ctxt { terms = M.insert name (Q S.empty assnTy) (terms ctxt) }) expr
   ECase expr productions -> do
-    ety <- ti (appFail fail "In case scrutinee, ") ctxt expr
+    ety <- ti (appFail fail "in case scrutinee, ") ctxt expr
     (inTys, outTys) <- unzip <$> sequence 
-      [ tiCase (appFail fail ("In '" ++ dcon ++  
+      [ tiCase (appFail fail ("in '" ++ dcon ++  
         "' branch of case expression, ")) ctxt ety d
       | d@(Production (Pattern (NDataCon dcon) _) _) <- productions ]
     outTy <- newTyVar "a" Flex
-    _ <- foldM (union' (appFail fail "In case expression, "))
+    _ <- foldM (union' (appFail fail "in case expression, "))
           ety inTys
-    resultTy <- foldM (union' (appFail fail "In case expression result, "))
+    resultTy <- foldM (union' (appFail fail "in case expression result, "))
                 outTy outTys 
     return resultTy
   Typed e ty -> do
+    case kindCheck (tycons ctxt) ty of
+      Left err -> fail err
+      Right () -> return ()
     ty' <- ti fail ctxt e
     union' fail ty ty'
   where
   unionF fname (i, t1) = union' (failF fname i) t1
-  failF fname i = appFail fail ("In argument " ++ show i ++ " of function '"
+  failF fname i = appFail fail ("in argument " ++ show i ++ " of function '"
     ++ fname ++ "', ")
 
 tiCase :: FailCont -> Context -> TyExpr -> Production Expr 
@@ -257,14 +284,14 @@ tiCase :: FailCont -> Context -> TyExpr -> Production Expr
 tiCase fail ctxt ety 
   (Production (Pattern (NDataCon dcon) argNames) outExpr) = 
     case M.lookup dcon (funcs ctxt) of
-      Nothing -> fail ("Data constructor " ++ dcon ++
+      Nothing -> fail ("data constructor " ++ dcon ++
         " not in scope")
-      Just (Func, _) -> fail ("Expected data constructor" ++
+      Just (Func, _) -> fail ("expected data constructor" ++
         " in case alternative but found function " ++ dcon)
       Just (DataCon, scheme) -> do
         (argTys, retTy) <- instantiateFunc scheme
         case strictZipWith zipper argNames argTys of
-          Left (i, j) -> fail ("Data constructor " ++ dcon ++
+          Left (i, j) -> fail ("data constructor " ++ dcon ++
             " expects " ++ show j ++ " arguments but receives " ++ show i
             ++ " in case alternative")
           Right vs -> do
@@ -296,7 +323,7 @@ generalize (argTys, retTy) = Q vars (argTys, retTy) where
 funcTyVars :: FuncDefn -> Either String (Set String)
 funcTyVars (FuncDefn args retTy e) = if S.null freeVarsInE
   then Right vars
-  else Left (plural (S.size freeVarsInE) "Type variable" ++ " " ++ showV freeVarsInE ++ " not in scope")
+  else Left (plural (S.size freeVarsInE) "type variable" ++ " " ++ showV freeVarsInE ++ " not in scope")
   where
   vars = S.unions (map freeVarsM (retTy : map getArgTy args))
   showV = intercalate ", " . map (\x -> "'" ++ x ++ "'") . S.toList
@@ -314,7 +341,7 @@ createFuncTy :: FailCont -> FuncDefn
 createFuncTy fail fdef@(FuncDefn args retTy e) = do
   case duplicated [ n | TypedIdent (NTerm n) _ <- args ] of
     Nothing -> return ()
-    Just x -> fail $ "Duplicate function argument '" ++ x ++ "'"
+    Just x -> fail $ "duplicate function argument '" ++ x ++ "'"
   vars <- case funcTyVars fdef of
     Left e -> fail e
     Right x -> return x
