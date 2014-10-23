@@ -1,11 +1,11 @@
-module TypeCheck where
+{-# LANGUAGE Rank2Types #-}
+module Typecheck where
 
 import AST
-import Eval (GlobalCtxt, interpOp, interpCmp)
 
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<|>))
 import Control.Arrow (second)
-import Control.Monad (foldM, zipWithM_)
+import Control.Monad (foldM, zipWithM, guard)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State (State, put, get, runState)
 import Control.Monad.Trans.Either (EitherT, hoistEither, runEitherT)
@@ -13,19 +13,13 @@ import Control.Monad.Trans.Either (EitherT, hoistEither, runEitherT)
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (mapMaybe)
 
 import Data.Set (Set)
 import qualified Data.Set as S
 
-type Arity = Int
-
-data Error = DataDeclScopeError NTyCon NDataCon
-  deriving Show
-
 -- elaborate data declaration
 elabDataDef :: NTyCon -> DataDefn -> Either [String] DataDef
-elabDataDef tyN@(NTyCon tyName) (DataDefn vars dataAlts) = 
+elabDataDef (NTyCon tyName) (DataDefn vars dataAlts) = 
   case [ "In data declaration " ++ tyName ++ ", in data constructor "
          ++ dN ++ ", type variable '" ++ tyVar ++ "' not in scope."
        | DataAlt (NDataCon dN) exprs <- dataAlts, e <- exprs
@@ -49,18 +43,22 @@ dataDefCtxt (DataDef tyName vars dataAlts) =
   varsE = map (TyVar . TV Flex) vars
   tyExpr = TAp (NTyCon tyName) varsE
 
+type Arity = Int
 data Context  = Context
   { terms  :: Map String (Quantified TyExpr)
   , funcs  :: Map String (Inj, Quantified ([TyExpr], TyExpr))
   , tycons :: Map String Arity
   }
 
+emptyContext :: Context
+emptyContext = Context M.empty M.empty M.empty
+
 instance Show Context where
   show = pprintContext
 
 pprintContext :: Context -> String
 pprintContext (Context ts fs tycs) = intercalate "\n" 
-  . intercalate ["\n"]
+  . intercalate [""]
   $ [mp ppTyCons tycs, mp ppFunc fs, mp ppTerm ts]
   where
   mp f = M.elems . M.mapWithKey f
@@ -87,13 +85,16 @@ unionC (Context a b c) (Context a' b' c') = if M.null iAll
   iAll = M.unions [ia, ib, ic]
   err key _ _ = "Duplicate definition for name '" ++ key ++ "'"
 
-data Inj = Func | DataCon deriving Show
-
 data Quantified a = Q (Set String) a deriving Show
 
 type TypeEnv = Map NTerm (Quantified TyExpr)
 
 type Subst = Map String TyExpr
+
+type FailCont = forall a. String -> TypeCheck a
+
+appFail :: FailCont -> String -> FailCont
+appFail fail s = fail . (s ++)
 
 nullSubst :: Subst
 nullSubst = M.empty
@@ -112,12 +113,12 @@ strictZipWith f = g (0 :: Int) where
   g n xs@(_ : _) [] = Left (n + length xs, n)
   g n (x : xs) (y : ys) = fmap (f x y :) (g (n + 1) xs ys)
 
-union' :: TyExpr -> TyExpr -> TypeCheck TyExpr
-union' ty1 ty2 = do
+union' :: FailCont
+  -> TyExpr -> TyExpr -> TypeCheck TyExpr
+union' fail ty1 ty2 = do
   ty1' <- evalTy ty1
   ty2' <- evalTy ty2
-  union ty1' ty2'
-
+  union fail ty1' ty2'
 
 evalTy :: TyExpr -> TypeCheck TyExpr
 evalTy ty = do
@@ -128,39 +129,43 @@ plural :: Int -> String -> String
 plural 1 s = s
 plural n s = s ++ "s"
 
-union :: TyExpr -> TyExpr -> TypeCheck TyExpr
-union (TAp tcon1@(NTyCon n1) e1s) (TAp tcon2@(NTyCon n2) e2s) = if tcon1 == tcon2
+union :: FailCont
+  -> TyExpr -> TyExpr -> TypeCheck TyExpr
+union fail ty1@(TAp tcon1@(NTyCon n1) e1s) 
+           ty2@(TAp tcon2@(NTyCon n2) e2s) = if tcon1 == tcon2
   then do
-    unionOps <- hoistEither $ case strictZipWith union e1s e2s of
-      Right uO -> Right uO
-      Left (i, j) -> Left $ "Type constructor '" ++ n1 ++ "' expected "
+    unionOps <- case strictZipWith (union fail') e1s e2s of
+      Right uO -> return uO
+      Left (i, j) -> fail' $ "Type constructor '" ++ n1 ++ "' expected "
         ++ show i ++ " " ++ plural i "type argument"
         ++ " but was given " ++ show j ++ "."
     argTys <- sequence unionOps
     return (TAp tcon1 argTys)
-  else hoistEither $ Left ("Expected type constructor " ++ n1 
+  else fail' ("Expected type constructor " ++ n1 
         ++ " but was given " ++ n2)
-union (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
-  then varBind t (TyVar u)
-  else varBind u (TyVar t)
-union (TyVar u) t = varBind u t
-union t (TyVar u) = varBind u t
-union IntTy IntTy = return IntTy
-union StrTy StrTy = return StrTy
-union t1 t2 = hoistEither $ Left ("Can't match expected type " 
+  where
+  fail' = appFail fail ("Can't match expected type " ++ pprintTyExpr ty1
+    ++ " with actual type " ++ pprintTyExpr ty2 ++ ", specifically, ")
+union fail (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
+  then varBind fail t (TyVar u)
+  else varBind fail u (TyVar t)
+union fail (TyVar u) t = varBind fail u t
+union fail t (TyVar u) = varBind fail u t
+union _ IntTy IntTy = return IntTy
+union _ StrTy StrTy = return StrTy
+union fail t1 t2 = fail ("Can't match expected type " 
   ++ pprintTyExpr t1
   ++ " with actual type " ++ pprintTyExpr t2)
 
-varBind :: TyVar -> TyExpr -> TypeCheck TyExpr
-varBind u@(TV flex name) t = case t of
+varBind :: FailCont
+  -> TyVar -> TyExpr -> TypeCheck TyExpr
+varBind fail u@(TV flex name) t = case t of
   TyVar u' | u == u' -> return t
-  --IntTy -> primErr "Int"
-  --StrTy -> primErr "String"
-  _ | S.member name (freeVars t) -> hoistEither
-    $ Left ("Occurs check error: unifying type variable " ++ name ++ 
-        " with type " ++ pprintTyExpr t ++ " would lead to infinite type")
-  _ | flex == Rigid -> hoistEither
-    $ Left ("Cannot match rigid type variable '" ++ name ++ "' with type "
+  _ | S.member name (freeVars t) -> fail
+      ("Occurs check error: unifying type variable '" ++ name ++ 
+        "' with type " ++ pprintTyExpr t ++ " would lead to infinite type")
+  _ | flex == Rigid -> fail
+    ("Cannot match rigid type variable '" ++ name ++ "' with type "
         ++ pprintTyExpr t)
   _ -> do
       addSubst name t
@@ -183,7 +188,7 @@ freeVars ty = case ty of
 instantiate :: Flex -> ((TyExpr -> TyExpr) -> (a -> a)) -> 
   Quantified a -> TypeCheck a
 instantiate flex mapf (Q vars expr) = do
-  nvars <- mapM (\x -> (,) x <$> newTyVar flex) (S.toList vars)
+  nvars <- mapM (\x -> (,) x <$> newTyVar x flex) (S.toList vars)
   return (mapf (apply (M.fromList nvars)) expr)
 
 instantiateE :: Quantified TyExpr -> TypeCheck TyExpr
@@ -195,69 +200,75 @@ instantiateFunc = instantiate Flex mapf where
 
 data TIState = TIState Int Subst deriving Show
 
-newTyVar :: Flex -> TypeCheck TyExpr
-newTyVar flex = do
+newTyVar :: String -> Flex -> TypeCheck TyExpr
+newTyVar str flex = do
   (TIState i s) <- lift get
   lift $ put (TIState (i + 1) s)
-  return (TyVar (TV flex ("a" ++ show i)))
+  return (TyVar (TV flex (str ++ show i)))
 
 type TypeCheck = EitherT String (State TIState)
 
-ti :: Context -> Expr -> TypeCheck TyExpr
-ti ctxt e = case e of
+ti :: FailCont -> Context -> Expr -> TypeCheck TyExpr
+ti fail ctxt e = case e of
   EInt _ -> return IntTy
   EStr _ -> return StrTy
   EVar vname -> case M.lookup vname (terms ctxt) of
-    Nothing -> hoistEither $ Left ("Variable '" ++ vname ++ "' not in scope")
+    Nothing -> fail ("Variable '" ++ vname ++ "' not in scope")
     Just scheme -> do
       ty <- instantiateE scheme
       return ty
-  EConstrAp (NDataCon dcon) exprs -> 
-    ti ctxt (EAp (NTerm dcon) exprs)
-  EAp (NTerm fname) exprs -> case M.lookup fname (funcs ctxt) of
-    Nothing -> hoistEither $ Left ("Function '" ++ fname ++ "' not in scope")
+  EAp inj fname exprs -> case M.lookup fname (funcs ctxt) of
+    Nothing -> fail ("Function '" ++ fname ++ "' not in scope")
     Just (_, scheme) -> do
       (argTys, retTy) <- instantiateFunc scheme
-      argTys2 <- mapM (ti ctxt) exprs
-      case strictZipWith union' argTys argTys2 of
-        Left (i, j) -> hoistEither $ Left ("Function " ++ fname ++ " has " ++ show i
+      argTys2 <- zipWithM (\i -> ti (failF fname i) ctxt) 
+         [1 :: Int ..] exprs
+      case strictZipWith (unionF fname) (zip [1..] argTys) argTys2 of
+        Left (i, j) -> fail ("Function " ++ fname ++ " expects " ++ show i
           ++ " arguments, but received " ++ show j)
         Right toUnion -> sequence toUnion
       return retTy
   ELet (TypedIdent (NTerm name) _) assn expr -> do
-    assnTy <- ti ctxt assn
-    ti (ctxt { terms = M.insert name (Q S.empty assnTy) (terms ctxt) }) expr
-  ECase expr dataAlts -> do
-    ety <- ti ctxt expr
-    (inTys, outTys) <- unzip <$> mapM (tiCase ctxt ety) dataAlts
-    outTy <- newTyVar Flex
-    _ <- foldM union' ety inTys
-    resultTy <- foldM union' outTy outTys 
+    assnTy <- ti (appFail fail ("In let-expression assignment for variable '"
+         ++ name ++ "', ")) ctxt assn
+    ti fail (ctxt { terms = M.insert name (Q S.empty assnTy) (terms ctxt) }) expr
+  ECase expr productions -> do
+    ety <- ti (appFail fail "In case scrutinee, ") ctxt expr
+    (inTys, outTys) <- unzip <$> sequence 
+      [ tiCase (appFail fail ("In '" ++ dcon ++  
+        "' branch of case expression, ")) ctxt ety d
+      | d@(Production (Pattern (NDataCon dcon) _) _) <- productions ]
+    outTy <- newTyVar "a" Flex
+    _ <- foldM (union' (appFail fail "In case expression, "))
+          ety inTys
+    resultTy <- foldM (union' (appFail fail "In case expression result, "))
+                outTy outTys 
     return resultTy
-  EIntBinOp op e1 e2 -> ti ctxt (EAp (NTerm (interpOp op)) [e1, e2])
-  EIntBinCmp cmp e1 e2 -> ti ctxt (EAp (NTerm (interpCmp cmp)) [e1, e2])
-  ENegate e -> ti ctxt (EAp (NTerm "negate") [e])
   Typed e ty -> do
-    ty' <- ti ctxt e
-    union' ty ty'
+    ty' <- ti fail ctxt e
+    union' fail ty ty'
+  where
+  unionF fname (i, t1) = union' (failF fname i) t1
+  failF fname i = appFail fail ("In argument " ++ show i ++ " of function '"
+    ++ fname ++ "', ")
 
-tiCase :: Context -> TyExpr -> Production Expr 
+tiCase :: FailCont -> Context -> TyExpr -> Production Expr 
        -> TypeCheck (TyExpr, TyExpr)
-tiCase ctxt ety 
+tiCase fail ctxt ety 
   (Production (Pattern (NDataCon dcon) argNames) outExpr) = 
     case M.lookup dcon (funcs ctxt) of
-      Nothing -> hoistEither $ Left ("Data constructor " ++ dcon ++
+      Nothing -> fail ("Data constructor " ++ dcon ++
         " not in scope")
-      Just (Func, _) -> hoistEither $ Left ("Expected data constructor" ++
+      Just (Func, _) -> fail ("Expected data constructor" ++
         " in case alternative but found function " ++ dcon)
       Just (DataCon, scheme) -> do
         (argTys, retTy) <- instantiateFunc scheme
         case strictZipWith zipper argNames argTys of
-          Left (i, j) -> hoistEither $ Left ("Data constructor " ++ dcon ++
+          Left (i, j) -> fail ("Data constructor " ++ dcon ++
             " expects " ++ show j ++ " arguments but receives " ++ show i
             ++ " in case alternative")
           Right vs -> do
-            outTy <- ti (updateCtxt vs) outExpr
+            outTy <- ti fail (updateCtxt vs) outExpr
             return (retTy, outTy)
   where
   zipper (NTerm x) y = (x, Q S.empty y)
@@ -294,49 +305,54 @@ funcTyVars (FuncDefn args retTy e) = if S.null freeVarsInE
   freeVarsM (Just ty) = freeVars ty
   getArgTy (TypedIdent _ mty) = mty
   
+duplicated :: Eq a => [a] -> Maybe a
+duplicated [] = Nothing
+duplicated (x : xs) = (guard (x `elem` xs) >> return x) <|> duplicated xs
 
-createFuncTy :: FuncDefn
+createFuncTy :: FailCont -> FuncDefn
   -> TypeCheck (Quantified ([(String, TyExpr)], TyExpr, Expr))
-createFuncTy fdef@(FuncDefn args retTy e) = do
-  vars <- hoistEither $ funcTyVars fdef
+createFuncTy fail fdef@(FuncDefn args retTy e) = do
+  case duplicated [ n | TypedIdent (NTerm n) _ <- args ] of
+    Nothing -> return ()
+    Just x -> fail $ "Duplicate function argument '" ++ x ++ "'"
+  vars <- case funcTyVars fdef of
+    Left e -> fail e
+    Right x -> return x
   args' <- mapM (\(TypedIdent (NTerm n) ty) -> 
     do { ty' <- mkTy ty; return (n, ty') }) args
   retTy' <- mkTy retTy
   return (Q vars (args', retTy', e))
   where
-  mkTy Nothing = newTyVar Flex
+  mkTy Nothing = newTyVar "a" Flex
   mkTy (Just e) = return e
 
 freeTyVars :: Expr -> Set String
 freeTyVars express = case express of
-  EConstrAp _ es -> S.unions (map freeTyVars es)
-  EAp _ es -> S.unions (map freeTyVars es)
+  EAp _ _ es -> S.unions (map freeTyVars es)
   ECase e prods -> freeTyVars e `S.union` 
     S.unions [ freeTyVars e | Production _ e <- prods ]
   ELet (TypedIdent term (Just ty)) e1 e2 -> freeVars ty `S.union`
     freeTyVars e1 `S.union` freeTyVars e2
-  EIntBinOp _ e1 e2 -> freeTyVars e1 `S.union` freeTyVars e2
-  EIntBinCmp _ e1 e2 -> freeTyVars e1 `S.union` freeTyVars e2
-  ENegate e -> freeTyVars e
-  ESeq e1 e2 -> freeTyVars e1 `S.union` freeTyVars e2
   Typed e ty -> freeTyVars e `S.union` freeVars ty
   _ -> S.empty
 
 tiFunc :: Context -> NTerm -> FuncDefn
   -> TypeCheck (Quantified ([TyExpr], TyExpr))
 tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
-  funcTy <- createFuncTy fdef
+  funcTy <- createFuncTy fail fdef
   (vs, expRetTy, e) <- instantiate Rigid mapf funcTy
-  actRetTy <- ti (updateCtxt vs expRetTy) expr
-  retTy <- union' expRetTy actRetTy
+  actRetTy <- ti fail (updateCtxt vs expRetTy) expr
+  retTy <- union' fail expRetTy actRetTy
   vs' <- mapM evalTy (map snd vs)
   let actFuncTy = generalize (vs', retTy)
   return actFuncTy
   where
+  fail s = hoistEither (Left ("In function declaration '" ++ fname ++
+    "', " ++ s))
   mapf f (args, retTy, exp) = (map (second f) args, f retTy
                               , modifyTypesE f exp)
   newArg (TypedIdent (NTerm x) _) = do
-    var <- newTyVar Flex
+    var <- newTyVar "a" Flex
     return (x, var)
   updateCtxt :: [(String, TyExpr)] -> TyExpr -> Context
   updateCtxt vs retTy = 
@@ -349,20 +365,14 @@ tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
 modifyTypesE :: (TyExpr -> TyExpr) -> Expr -> Expr
 modifyTypesE f = g where
   g express = case express of
-    EConstrAp c es -> EConstrAp c (map g es)
-    EAp fun es -> EAp fun (map g es)
+    EAp inj fun es -> EAp inj fun (map g es)
     ECase e prods -> ECase (g e) [ Production p (g e) 
                                  | Production p e <- prods ]
     ELet (TypedIdent v mty) e1 e2 -> 
       ELet (TypedIdent v (fmap f mty)) (g e1) (g e2)
-    EIntBinOp  op e1 e2 -> EIntBinOp  op (g e1) (g e2)
-    EIntBinCmp op e1 e2 -> EIntBinCmp op (g e1) (g e2)
-    ENegate e -> ENegate (g e)
-    ESeq e1 e2 -> ESeq (g e1) (g e2)
     Typed e ty -> Typed (g e) (f ty)
-    exp -> exp
-    
-  
+    _ -> express
+
 
 runTypeCheck :: TypeCheck a -> (Either String a, TIState)
 runTypeCheck t = runState (runEitherT t) initTIState

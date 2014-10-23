@@ -1,4 +1,3 @@
-data Bool() of True() | False();
 data List(a) of Nil() | Cons(a, List(a));
 data And(a, b) of And(a, b);
 
@@ -24,5 +23,5 @@ quicksort(xs) = case xs
   };
 
 
-main() = quicksort(Cons(13, Cons(5, Cons(2, Cons(10, Cons(3, Nil()))))));
+main() = quicksort([13, 5, 2, 10, True()]);
 

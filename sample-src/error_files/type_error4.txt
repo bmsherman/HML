@@ -1,0 +1,11 @@
+data List(a) of Nil() | Cons(a, List(a));
+unknownType() : Universe() = 0;
+
+elim(x : a) : b = case x {};
+
+woops() : List(a,b) = case 0 {};
+
+listErr(x : Int, y : a) : List(a, b) = case x <= 0
+  { True() => Nil()
+  | False() => Cons(y, listErr(x - 1, y))
+  };

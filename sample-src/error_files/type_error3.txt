@@ -1,0 +1,9 @@
+branchMismatch(x) = case x
+  { True() => "Hi!"
+  | False() => 0
+  };
+
+indexingNonArray(arr : Int) = get(arr,0);
+
+
+arrayTypeMismatch(arr : Array(a)) : b = get(arr, 0);

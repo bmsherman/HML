@@ -1,0 +1,6 @@
+s() : String = "abcd";
+s() : Int = 0; -- duplicate definition
+
+
+main() : Int = out_string("test") >> out_string(s())
+  >> out_int(42 * x + (8 - 4)); -- no variable x in scope

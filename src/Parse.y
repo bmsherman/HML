@@ -10,7 +10,7 @@ import Data.Char (toLower)
 import Data.List (intercalate)
 import Lex
 import AST
-import TypeCheck
+import Typecheck
 
 }
 
@@ -21,30 +21,32 @@ import TypeCheck
 %error { happyError }
 
 %token
-  '('              { Paren L }
-  ')'              { Paren R }
-  '{'              { Brace L }
-  '}'              { Brace R }
-  ':'              { Colon }
-  ','              { Comma }
-  ';'              { Semi }
-  '+'              { IntBinOp Plus }
-  '-'              { IntBinOp Minus }
-  '*'              { IntBinOp Times }
-  '/'              { IntBinOp Div   }
-  intbincmp        { IntBinCmp $$ }
-  '~'              { Negate }
-  '|'              { Or }
-  '=>'             { To }
-  '>>'             { Seq }
+  '('              { Delim "(" }
+  ')'              { Delim ")" }
+  '{'              { Delim "{" }
+  '}'              { Delim "}" }
+  '['              { Delim "[" }
+  ']'              { Delim "]" }
+  ':'              { Ctrl ":" }
+  ','              { Ctrl "," }
+  ';'              { Ctrl ";" }
+  '+'              { FuncT "+" }
+  '-'              { FuncT "-" }
+  '*'              { FuncT "*" }
+  '/'              { FuncT "/"   }
+  intbincmp        { FuncT x | x `elem` ["<=", "==", "<", ">", ">="] }
+  '~'              { FuncT "~" }
+  '|'              { Ctrl "|" }
+  '=>'             { Ctrl "=>" }
+  '>>'             { FuncT ">>" }
   int              { Int $$ }
   string           { String $$ }
   '='              { Equals  }
-  data             { Data }
-  case             { Case }
-  of               { Of   }
-  let              { Let  }
-  in               { In   }
+  data             { Keyword "data" }
+  case             { Keyword "case" }
+  of               { Keyword "of"   }
+  let              { Keyword "let"  }
+  in               { Keyword "in"   }
   intty            { UName x | x == "Int" }
   strty            { UName x | x == "String" }
   uname            { UName $$ }
@@ -77,19 +79,21 @@ Expr :: { Expr }
   : int { EInt $1 }
   | string { EStr $1 }
   | lname { EVar $1 }
-  | uname '(' ExprList ')' { EConstrAp (NDataCon $1) $3 }
-  | lname '(' ExprList ')' { EAp (NTerm $1) $3 }
+  | uname '(' ExprList ')' { EAp DataCon $1 $3 }
+  | lname '(' ExprList ')' { EAp Func $1 $3 }
   | case Expr '{' ProdList '}' { ECase $2 $4 }
   | let TypedIdent '=' Expr in Expr { ELet $2 $4 $6 }
-  | Expr '+' Expr { EIntBinOp Plus $1 $3 }
-  | Expr '-' Expr { EIntBinOp Minus $1 $3 }
-  | Expr '*' Expr { EIntBinOp Times $1 $3 }
-  | Expr '/' Expr { EIntBinOp Div   $1 $3 }
-  | Expr intbincmp Expr { EIntBinCmp $2 $1 $3 }
-  | '~' Expr { ENegate $2 }
-  | Expr '>>' Expr { ESeq $1 $3 }
+  | Expr '+' Expr { (primFunc "+") [$1, $3] }
+  | Expr '-' Expr { (primFunc "-") [$1, $3] }
+  | Expr '*' Expr { (primFunc "*") [$1, $3] }
+  | Expr '/' Expr { (primFunc "/") [$1, $3] }
+  | Expr intbincmp Expr { (primFunc (unFunc $2)) [$1, $3] }
+  | '~' Expr { (primFunc "~") [$2] }
+  | Expr '>>' Expr { EAp Func "seq" [$1, $3] }
   | Expr ':' TyExpr { Typed $1 $3 }
   | '(' Expr ')' { $2 }
+  | '[' ExprList ']' { foldr (\x y -> EAp DataCon "Cons" [x, y])
+                       (EAp DataCon "Nil" []) $2 }
 
 ExprList :: { [Expr] }
   :    { [] }
@@ -163,28 +167,29 @@ Typing :: { Maybe TyExpr }
 
 {
 
+primFunc :: String -> [Expr] -> Expr
+primFunc s = EAp Func ('_' : s)
 
 processDecl :: Decl -> Alex Decl
 processDecl d = do
-  ctxt <- alexGetUserState
-  --traceShow d True `seq` return ()
-  dctxt <- eToA $ case d of
-    DataDecl tycon@(NTyCon tyN) datadef ->
-      fmap dataDefCtxt (elabDataDef tycon datadef)
-    FuncDecl n@(NTerm nt) funcDef ->
-      left (\x -> ["In function declaration '" ++ nt ++ "', " ++ x]) 
-        $ funcCtxt ctxt n funcDef
-  ctxt' <- eToA $ unionC ctxt dctxt
-  alexSetUserState ctxt'
+  (ctxt, errors) <- alexGetUserState
+  let result = (unionC ctxt =<<) $ case d of
+	DataDecl tycon@(NTyCon tyN) datadef ->
+	  fmap dataDefCtxt (elabDataDef tycon datadef)
+	FuncDecl n@(NTerm nt) funcDef ->
+	  left (:[]) 
+	    $ funcCtxt ctxt n funcDef
+  prefix <- prefixPos
+  alexSetUserState $ case result of
+    Left es -> (ctxt, [ prefix ++ ": " ++ x | x <- es ] ++ errors)
+    Right ctxt' -> (ctxt', errors)
   return d
-  where
-  eToA (Left xs) = do
-    prefix <- prefixPos
-    alexError $ intercalate "\n" [ prefix ++ ": " ++ x | x <- xs ]
-  eToA (Right y) = return y
 
 lexwrap :: (Token -> Alex a) -> Alex a
 lexwrap = (alexMonadScan >>=)
+
+unFunc :: Token -> String
+unFunc (FuncT x) = x
 
 prefixPos :: Alex String
 prefixPos = do
@@ -199,8 +204,11 @@ lineError s = do
 happyError :: Token -> Alex a
 happyError tok = lineError ("Parse error on token: '" ++ show tok ++ "'")
 
-parseDecls :: String -> Either String ([Decl], Context)
-parseDecls s = runAlex s $
-  liftM2 (,) (liftM reverse parse) alexGetUserState
+parseDecls :: Context -> String -> Either String ([Decl], (Context, [String]))
+parseDecls ctxt s = runAlex s $ do
+  alexSetUserState (ctxt, [])
+  decls <- parse
+  (ctxt, errors) <- alexGetUserState
+  return (reverse decls, (ctxt, reverse errors))
 
 }

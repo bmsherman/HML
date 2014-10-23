@@ -1,0 +1,21 @@
+data Bool() of True() | False();
+data Unit() of Unit();
+
+seq(x, y) = y;
+
+-- Arrays
+data Array(a) of NewArray(Int, a);
+
+makeArray(size : Int, defaultVal : a) : Array(a) = 
+  NewArray(size, defaultVal);
+
+set(arr : Array(a), pos : Int, val : a) : Unit() = Unit();
+
+get(arr : Array(a), pos : Int) : a = case arr
+  { NewArray(size, defaultVal) => defaultVal };
+
+
+-- IO 
+out_string(x : String) : Int = 0;
+out_int(x : Int) : Int = 0;
+in_int() : Int = 42;

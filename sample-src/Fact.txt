@@ -1,23 +1,21 @@
-data Bool() of True() | False();
-
-fact (x : Int) = case x <= 0 of
+fact (x : Int) = case x <= 0
     {  True()  => 1
     | False() => x * fact(x - 1) };
     
 fibsHelper (acc1 : Int , acc2 : Int, n : Int) : Int =
-  case n <= 0 of
+  case n <= 0
     { True()  => acc2
     | False() => fibsHelper(acc2, acc1 + acc2, n - 1)
     };
 
-fibs(n : Int) : Int = case n <= 1 of
+fibs(n : Int) : Int = case n <= 1
   { True()  => 1
   | False() => fibsHelper(1 , 1, n - 1)
   };
 
 data List(a) of Nil() | Cons(a, List(a));
 
-allFibs(start : Int, end : Int) : List(Int) = case end < start of
+allFibs(start : Int, end : Int) : List(Int) = case end < start
   {  True()  => Nil()
   | False() => Cons(fibs(start), allFibs(start + 1, end))
   };

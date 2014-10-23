@@ -6,41 +6,14 @@ newtype NTerm = NTerm String deriving (Eq, Show, Ord)
 newtype NTyCon = NTyCon String deriving (Eq, Show, Ord)
 newtype NDataCon = NDataCon String deriving (Eq, Show, Ord)
 
-data IntBinOp = Plus | Minus | Times | Div deriving Show
-data IntBinCmp = CmpLT | CmpLEQ | CmpEQ deriving Show
-
 data Expr = EInt Int
   | EStr String
   | EVar String
-  | EConstrAp NDataCon [Expr]
-  | EAp NTerm [Expr]
+  | EAp Inj String [Expr]
   | ECase Expr [Production Expr]
   | ELet TypedIdent Expr Expr
-  | EIntBinOp IntBinOp Expr Expr
-  | EIntBinCmp IntBinCmp Expr Expr
-  | ENegate Expr
-  | ESeq Expr Expr
   | Typed Expr TyExpr
   deriving Show
-
-data CExpr = CLit Lit
-  | CVar NTerm
-  | CAp String [NTerm]
-  | CCase NTerm [Production CExpr]
-  | CLet NTerm CExpr CExpr
-
-
-{-
-toCore :: Expr -> CExpr
-toCore e = case e of
-  EInt i -> CLit (CInt i)
-  EStr s -> CLit (CStr s)
-  EConstrAp (NDataCon dcon) exprs -> CAp dcon (map toCore exprs)
-  EAp (Nterm f) exprs -> CAp f (map toCore exprs)
-  ECase scrut prods -> CLet
--}
-
-data Lit = CInt Int | CStr String
 
 data TyExpr = IntTy | StrTy
   | TyVar TyVar
@@ -50,6 +23,8 @@ data TyExpr = IntTy | StrTy
 data TyVar = TV Flex String deriving (Eq, Show)
 
 data Flex = Flex | Rigid deriving (Eq, Show)
+
+data Inj = Func | DataCon deriving Show
 
 pprintTyExpr :: TyExpr -> String
 pprintTyExpr x = case x of

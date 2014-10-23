@@ -1,16 +1,12 @@
 data List(a) of Nil() | Cons(a, List(a));
 
-sum(xs : List(Int)) : Int = case xs of
+sum(xs : List(Int)) : Int = case xs
   { Nil() => 0 
   | Cons(y, ys) => y + sum(ys) };
   
-append(xs : List(a), ys : List(a)) : List(a) = case xs of
+append(xs : List(a), ys : List(a)) : List(a) = case xs
   {  Nil() => ys
   | Cons(z,zs) => Cons(z, append(zs,ys))
   };
 
---main() : Int = sum(Cons(1,Cons(3,Cons(10,Nil()))));
-main(x) : Int = case x of
-  { Nil() => x
-  | Cons(y,ys) => main(x)
-  };
+main() : Int = sum([1,3,6,10,15]);

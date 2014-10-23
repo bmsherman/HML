@@ -1,0 +1,15 @@
+x() : Int = 7;
+
+f(x : Int, y : Int, x : Int) : Int = x + y + z;
+
+f2(x : Int, y : Int) : Int = x + y + z;
+
+main() : Int = let x = x() in
+  out_int(x) >>
+  (let y = 3 in f1 (x + y)) >>
+  out_int(y);
+
+main2() : Int = let x = x() in
+  out_int(x) >>
+  (let y = 3 in x + y) >>
+  out_int(y);

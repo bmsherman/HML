@@ -1,0 +1,19 @@
+x() : Int = 7;
+
+f (x : Int) : Int = 
+  out_int(x()) >>
+  let x : Int = 2 in
+  let y : Int = 1 < 2 in -- type mismatch
+  out_string (x + y);
+
+square (x : Int) : Int = x * x;
+
+g (x, y) = square(x, y); -- num of parameters mismatch
+
+h (x : Bool()) = square(x); -- argument type mismatch
+
+tooGeneral (x : a) = square(x); -- argument must be Int
+
+tooGeneral2 (x : Int) : a = square(x); -- return type should be Int
+
+quartic (x) = square(x) * square(x);

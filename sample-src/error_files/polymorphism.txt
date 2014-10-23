@@ -1,0 +1,21 @@
+data Maybe(a) of Just(a) | Nothing();
+data List(a) of Nil() | Cons(a, List(a));
+
+alt(x, y) = case x
+  { Just(x1) => x
+  | Nothing() => y
+  };
+
+occursCheck(x) = alt(x, Just(x));
+
+tyVarScope(x : b) : a = x : a;
+
+scrutinee(x : List(Int)) = case x 
+  { Cons(y, ys) => 0
+  | False() => 1
+  };
+
+returnVal(x : Int) : Bool() = case x <= 0
+  { True() => 3
+  | False() => 5
+  };

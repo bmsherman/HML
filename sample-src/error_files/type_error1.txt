@@ -1,0 +1,9 @@
+y() : Bool() = True();
+x() : Int = True();  -- type error
+z() : String = "testing";
+
+main() : Int = let y = 9 in -- y : Int
+  let x = y * 2 in  -- x : Int
+  let y = x > 2 in  -- y : Bool() and shadows previous y
+  let z = x > 2 in  -- z : Bool()
+  out_int ( 42 * x + (y - 4));  -- type error since y : Bool()
