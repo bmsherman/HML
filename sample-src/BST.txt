@@ -1,0 +1,49 @@
+data Tree(a) of Leaf() | Branch(a, Tree(a), Tree(a));
+data List(a) of Nil() | Cons(a, List(a));
+
+append(xs, ys) = case xs
+  { Nil() => ys
+  | Cons(z, zs) => Cons(z, append(zs, ys))
+  };
+
+inOrder(tree) = case tree
+  { Leaf() => Nil()
+  | Branch(x, l, r) => append(inOrder(l), Cons(x, inOrder(r)))
+  };
+
+data Ordering() of LT() | EQ() | GT();
+
+compare(x, y) = case x < y
+  { True() => LT()
+  | False() => case x == y
+    { True() => EQ()
+    | False() => GT()
+    }
+  };
+
+
+-- Some binary search tree operations
+
+insertBST(x, tree) = case tree
+  { Leaf() => Branch(x, Leaf(), Leaf())
+  | Branch(y, l, r) => case compare(x, y)
+    { LT() => Branch(y, insertBST(x, l), r)
+    | EQ() => tree
+    | GT() => Branch(y, l, insertBST(x, r))
+    }
+  };
+
+memberBST(x, tree) = case tree
+  { Leaf() => False()
+  | Branch(y, l, r) => case compare(x,y)
+    { LT() => memberBST(x, l)
+    | EQ() => True()
+    | GT() => memberBST(x, r)
+    }
+  };
+
+listToBST(xs) = case xs
+  { Nil() => Leaf()
+  | Cons(y, ys) => insertBST(y, listToBST(ys))
+  };
+

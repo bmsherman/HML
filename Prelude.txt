@@ -6,7 +6,7 @@ seq(x, y) = y;
 undefined() = case 0 {};
 
 -- Arrays
-data Array(a) of ;
+data Array(a);
 
 makeArray(size : Int, defaultVal : a) : Array(a) = undefined();
 

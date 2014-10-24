@@ -1,3 +1,5 @@
+{-| An interpreter for the language. Not commented since this isn't
+necessary for this assignment. -}
 module Eval where
 
 import AST

@@ -5,7 +5,7 @@ sum(xs : List(Int)) : Int = case xs
   | Cons(y, ys) => y + sum(ys) };
   
 append(xs : List(a), ys : List(a)) : List(a) = case xs
-  {  Nil() => ys
+  { Nil() => ys
   | Cons(z,zs) => Cons(z, append(zs,ys))
   };
 

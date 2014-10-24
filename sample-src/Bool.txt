@@ -1,0 +1,19 @@
+not(x) = case x
+  { True() => False()
+  | False() => True()
+  };
+
+and(x, y) = case x
+  { True() => y
+  | False() => False()
+  };
+
+or(x, y) = case x
+  { True() => True()
+  | False() => y
+  };
+
+eqBool(x, y) = case x
+  { True() => y
+  | False() => not(y)
+  };

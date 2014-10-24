@@ -1,11 +1,14 @@
 data List(a) of Nil() | Cons(a, List(a));
-unknownType() : Universe() = 0;
+unknownType() : Universe() = 0; -- there's no such type constructor Universe
 
-elim(x : a) : b = case x {};
+elim(x : a) : b = case x {}; 
+  -- Typesafe coerce with incomplete pattern match
 
 woops() : List(a,b) = case 0 {};
+  -- But this doesn't work because of the kind error for List
 
 listErr(x : Int, y : a) : List(a, b) = case x <= 0
   { True() => Nil()
   | False() => Cons(y, listErr(x - 1, y))
   };
+  -- another kind error for List

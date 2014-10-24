@@ -1,5 +1,4 @@
-data Unit() of Unit();
-data Void() of ;
+data Void();
 data And(a,b) of And(a,b);
 data Or(a,b) of Left(a) | Right(b);
 

@@ -23,5 +23,5 @@ quicksort(xs) = case xs
   };
 
 
-main() = quicksort([13, 5, 2, 10, True()]);
+main() = quicksort([13, 5, 2, 10, 6]);
 

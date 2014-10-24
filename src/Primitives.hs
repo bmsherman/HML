@@ -31,9 +31,12 @@ primOps = M.unions [intBinOps ,neg, intCmpOps ]
   where
   neg = M.fromList [("_negate", (Func, Q S.empty ([IntTy], IntTy)))]
 
+-- | A typing context with only primitive operations included
 primContext :: Context
 primContext = Context M.empty primOps M.empty
 
+-- | A typing context that includes built-in functions from a Prelude
+-- code file
 preludeContext :: Context
 preludeContext = ctxt
   where

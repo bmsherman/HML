@@ -1,8 +1,28 @@
 data Either(a, b) of Left(Either(a)) | Right(b, Either(b));
+  -- Mismatch for number of parameters for Either
 
 data Maybe(a) of Just(a) | Nothing();
 
 test(x : Bool()) : Maybe(Int) = case x
-  { True() => Just(3) : Maybe(Int, Int)
+  { True() => Just(3) : Maybe(Int, Int) -- Maybe given two parameters
   | False() => Nothing()
+  };
+
+data Test() of MkTest(Integer()); -- no Integer in scope
+
+data Either(a,b) of Left(a) | Right(c);
+  -- type variable c not in scope (existentials are not allowed)
+
+
+data List(a) of Nil() | Cons(a, List(a));
+
+listHeadBad(xs) = case xs
+  { Cons(y, ys) => Just(y : a)   -- this is pretty much right
+                                 -- but 'a' has not been put in scope
+  | Nil() => Nothing()
+  };
+
+listHeadGood(xs) : Maybe(a) = case xs
+  { Cons(y, ys) => Just(y : a)     -- this works since 'a' is in scope
+  | Nil() => Nothing()
   };

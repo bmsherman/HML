@@ -70,8 +70,8 @@ DeclList :: { [Decl] }
   | DeclList Decl ';' {% liftM (: $1) (processDecl $2)  }
 
 Decl :: { Decl }
-  : data uname '(' IdentList ')' of DataAltList 
-     { DataDecl (NTyCon $2) (DataDefn $4 $7) }
+  : data uname '(' IdentList ')' DataAltList 
+     { DataDecl (NTyCon $2) (DataDefn $4 $6) }
   | lname '(' TypedIdentList ')' Typing '=' Expr
      { FuncDecl (NTerm $1) (FuncDefn $3 $5 $7) }
 
@@ -152,7 +152,7 @@ DataAlt :: { DataAlt }
 
 DataAltList :: { [DataAlt] }
   :   { [] }
-  | DataAltList1 { $1 }
+  | of DataAltList1 { $2 }
 
 DataAltList1 :: { [DataAlt] }
   : DataAlt  { [ $1 ] }
