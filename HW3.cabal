@@ -11,7 +11,8 @@ extra-source-files:  sample-src/*.txt sample-src/error_files/*.txt
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Lex, Parse, AST, Eval, Primitives, Test, Typecheck
+  exposed-modules:     AST, Compile, Eval, Lex, Parse, Primitives,
+                       Test, Typecheck
   build-depends:       base >=4.5 && <4.8,
                        array >=0.4 && <0.6,
                        containers >= 0.4 && <0.6,

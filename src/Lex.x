@@ -19,26 +19,17 @@ tokens :-
   $eol                          ;
   $white+                       ;
   "--".*                        ;
-  $digit+                       { lex (Int . read) }
-  "="                           { lexc Equals }
-  "+" | "-" | "*" | "/"         { lex FuncT }
-  "~"                           { lex FuncT }
-  "==" | "<=" | "<" | ">" | ">=" { lex FuncT }
-  ">>"                          { lex FuncT }
-  :                             { lex Ctrl }
-  ";"                           { lex Ctrl }
-  \,                            { lex Ctrl }
-  [\( \) \{ \}] | "[" | "]"     { lex Delim }
-  "|"                           { lex Ctrl }
-  "=>"                          { lex Ctrl }
-  \" ([^\"])* \"                { lex String }
-  "data"                        { lex Keyword }
-  "case"                        { lex Keyword }
-  "of"                          { lex Keyword }
-  "let"                         { lex Keyword }
-  "in"                          { lex Keyword }
-  $lower [$alpha $digit \_ \']* { lex LName }
-  $upper [$alpha $digit \_ \']* { lex UName }
+  $digit+                               { lex (Int . read) }
+  "="                                   { lexc Equals }
+  "+" | "-" | "*" | "/" | "~"           { lex FuncT }
+  "==" | "<=" | "<" | ">" | ">="        { lex FuncT }
+  ">>"                                  { lex FuncT }
+  : | ";" | "," | "|" | "=>"            { lex Ctrl }
+  [\( \) \{ \}] | "[" | "]"             { lex Delim }
+  \" ([^\"])* \"                        { lex String }
+  "data" | "case" | "of" | "let" | "in" { lex Keyword }
+  $lower [$alpha $digit \_ \']*         { lex LName }
+  $upper [$alpha $digit \_ \']*         { lex UName }
 
 {
 
