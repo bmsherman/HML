@@ -1,14 +1,17 @@
 module Compile where
 
-import Data.List (intercalate)
+import qualified Data.Bits as B
+import Data.List (intercalate, foldl')
+import Data.Maybe (catMaybes)
 
 data Instr = 
     BinOp String Oper Oper
   | Call String
   | Syscall
   | Push Oper
-  | Pop Register
+  | Pop Oper --Register
   | Ret
+  | Idiv Oper
 
   | Asciz String
   deriving (Eq, Show)
@@ -20,7 +23,6 @@ xor = BinOp "xor"
 add = BinOp "add"
 sub = BinOp "sub"
 imul = BinOp "imul"
-idiv = BinOp "idiv"
 
 data Decl = Label String [Instr]
   deriving (Eq, Show)
@@ -66,7 +68,8 @@ printInstr i = case i of
   Call s -> "call " ++ s
   Syscall -> "syscall"
   Push o -> unop "push" o
-  Pop r -> "pop " ++ show r
+  Idiv o -> unop "idiv" o
+  Pop o -> unop "pop" o
   Ret -> "ret"
   Asciz str -> ".asciz \"" ++ str ++ "\""
   where
@@ -78,40 +81,61 @@ printDecl (Label name instrs) = name ++ ":\n" ++
   intercalate "\n" (map (("  " ++) . printInstr) instrs)
 
 mkint :: Decl
-mkint = Label "mkint"
-  [ Push (Reg R12)
-  , mov (Reg RDI) (Reg R12)
-  , mov (Imm 8) (Reg EDI)
-  , Call "malloc"
-  , movl (Imm 0) (Mem 0 RAX)
-  , mov (Reg R12) (Mem 4 RAX)
-  , Pop R12
-  , Ret
-  ]
+mkint = Label "mkint" $ mkFunc $ \(x:_) ->
+  [ Push (Reg x) ]
+  ++ callFunc "malloc" [Imm 8] (\addr ->
+  [ Pop (Mem 0 addr)])
+
+constructor :: String -> Int -> Decl
+constructor name arity = Label name $ mkFunc $ \xs -> 
+  let xs' = take arity xs in
+  [ Push (Reg x) | x <- reverse xs' ]
+  ++ callFunc "malloc" [Imm (8 * (arity + 1))] (\addr ->
+  movl (Imm (hash name)) (Mem 0 addr) : 
+    [ Pop (Mem (8 * i) addr) | i <- take arity [1..] ]
+  )
+  where
+  hash = foldl' (\h c -> 33*h `B.xor` fromEnum c) 5381
 
 intOp :: (Oper -> Oper -> Instr) -> [Instr]
-intOp op = 
-  [ Push (Reg R12)
-  , Push (Reg R13)
-  , mov (Reg RDI) (Reg R12)
-  , mov (Reg RSI) (Reg R13)
-  , mov (Mem 4 R12) (Reg RDI)
-  , op (Mem 4 R13) (Reg RDI)
-  , Call "mkint"
-  , Pop R13
-  , Pop R12
-  , Ret
-  ]
+intOp op = mkFunc $ \(x:y:_) ->
+  [ mov (Mem 0 x) (Reg RDI)
+  , op (Mem 0 y) (Reg RDI)
+  ] ++ callFunc "mkint" [Reg RDI] (\_ -> [])
 
 intOps :: [Decl]
 intOps = [ Label (toSymbolName x) (intOp y)
   | (x, y) <- [ ("_+", add), ("_-", sub), ("_*", imul) ]
   ]
 
+divOp :: Decl
+divOp = Label (toSymbolName "_/") $ mkFunc $ \(x:y:_) ->
+  [ xor (Reg RDX) (Reg RDX)
+  , mov (Mem 0 x) (Reg RAX)
+  , mov (Mem 0 y) (Reg RSI)
+  , Idiv (Reg RSI) ]
+  ++ callFunc "mkint" [Reg RAX] (\_ -> [])
+
+funcRegs :: [Register]
+funcRegs = [RDI, RSI, RDX, RCX, R8, R9]
+
+tempRegs :: [Register]
+tempRegs = [R12, R13, R14, R15]
+
+mkFunc :: ([Register] -> [Instr]) -> [Instr]
+mkFunc f = f funcRegs ++ [Ret]
+
+callFunc :: String -> [Oper] -> (Register -> [Instr]) -> [Instr]
+callFunc fname opers andThen = catMaybes (zipWith maybeMov opers funcRegs)
+  ++ [Call fname] ++ andThen RAX
+  where
+  maybeMov (Reg r) r' | r == r' = Nothing
+  maybeMov o r = Just (mov o (Reg r))
+
 outint :: [Decl]
 outint = 
-  [ Label "out_int"
-    [ mov (Mem 4 RDI) (Reg RSI)
+  [ Label "out_int" $ mkFunc $ \(x:_) ->
+    [ mov (Mem 0 x) (Reg RSI)
     , mov (Global "intFormat") (Reg RDI)
     , xor (Reg RAX) (Reg RAX)
     , Call "printf"
@@ -121,8 +145,16 @@ outint =
     [ Asciz "%ld\\n" ]
   ]
 
+outstring :: Decl
+outstring = Label "out_string"
+  [ xor (Reg RAX) (Reg RAX)
+  , Call "printf"
+  , Ret
+  ]
+
 prims :: IO ()
-prims = mapM_ (putStrLn . printDecl) (mkint : outint ++ intOps)
+prims = mapM_ (putStrLn . printDecl) 
+  (constructor "cons" 2 : mkint : outstring : divOp : outint ++ intOps)
 
 toSymbolName :: String -> String
 toSymbolName = concatMap f where
