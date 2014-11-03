@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -w #-}
 module Lex where
 
+import Data.Int (Int32)
 import Typecheck (Context, emptyContext)
 import Prelude hiding (lex)
 }
@@ -34,7 +35,7 @@ tokens :-
 {
 
 data Token =
-    Int Int
+    Int Int32
   | String String
   | LName String
   | UName String

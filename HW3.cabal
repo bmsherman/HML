@@ -6,8 +6,8 @@ author:              Ben Sherman
 maintainer:          bmsherman@users.noreply.github.com
 build-type:          Simple
 cabal-version:       >=1.10
-data-files:          Prelude.txt
-extra-source-files:  sample-src/*.txt sample-src/error_files/*.txt
+data-files:          Prelude.hm
+extra-source-files:  sample-src/*.hm sample-src/error_files/*.hm
 
 library
   hs-source-dirs:      src

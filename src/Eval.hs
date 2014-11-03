@@ -6,11 +6,12 @@ import AST
 
 import Control.Applicative ((<$>))
 
+import Data.Int (Int32)
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 
-data Value = VInt Int
+data Value = VInt Int32
   | VStr String
   | VConstrAp String [Value]
   deriving Show
@@ -35,11 +36,11 @@ interpreter = Evaluator
   (M.fromList ops)
   (EvalInterp . funEval)
   where
-  binOp :: (Int -> Int -> Int) -> EvalInterp [Value] Value
+  binOp :: (Int32 -> Int32 -> Int32) -> EvalInterp [Value] Value
   binOp f = EvalInterp $ \_ xs -> case xs of 
       [VInt i, VInt j] -> Right (VInt (f i j))
       _ -> Left "binary operation error"
-  binCmp :: (Int -> Int -> Bool) -> EvalInterp [Value] Value
+  binCmp :: (Int32 -> Int32 -> Bool) -> EvalInterp [Value] Value
   binCmp f = EvalInterp $ \_ xs -> case xs of 
       [VInt i, VInt j] -> Right (bool (f i j))
       _ -> Left "binary comparison error"

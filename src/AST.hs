@@ -1,5 +1,6 @@
 module AST where
 
+import Data.Int (Int32)
 import Data.List (intercalate)
 
 -- | names of terms
@@ -12,7 +13,7 @@ newtype NTyCon = NTyCon String deriving (Eq, Show, Ord)
 newtype NDataCon = NDataCon String deriving (Eq, Show, Ord)
 
 -- | Term-level expressions
-data Expr = EInt Int              -- ^ constant integer
+data Expr = EInt Int32            -- ^ constant integer
   | EStr String                   -- ^ constant string
   | EVar String                   -- ^ variable reference
   | EAp Inj String [Expr]         -- ^ application of function or 

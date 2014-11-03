@@ -41,5 +41,5 @@ preludeContext :: Context
 preludeContext = ctxt
   where
   preludeSrc = unsafePerformIO $ 
-    readFile =<< getDataFileName "Prelude.txt"
+    readFile =<< getDataFileName "Prelude.hm"
   Right (_, (ctxt, _)) = parseDecls primContext preludeSrc

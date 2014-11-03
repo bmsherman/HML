@@ -12,7 +12,7 @@ cabal build
 
 # run
 
-for f in sample-src/error_files/*.txt sample-src/*.txt
+for f in sample-src/error_files/*.hm sample-src/*.hm
 do
   echo "File: $f"
   echo "--------"
