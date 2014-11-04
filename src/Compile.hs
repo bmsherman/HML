@@ -71,6 +71,7 @@ toCExpr usedVars e = flip evalState (0, usedVars `S.union` varsInExp e) (f e ) w
 data Instr = 
     BinOp String Oper Oper
   | Call String
+  | Jump String String
   | Syscall
   | Push Oper
   | Pop Oper --Register
@@ -83,12 +84,16 @@ data Instr =
 
 mov, movl, xor :: Oper -> Oper -> Instr
 mov = BinOp "mov"
+cmpl = BinOp "cmpl"
+cmp = BinOp "cmp"
 movl = BinOp "movl"
 movq = BinOp "movq"
 xor = BinOp "xor"
 add = BinOp "add"
 sub = BinOp "sub"
 imul = BinOp "imul"
+
+je = Jump "je"
 
 data CDecl = Label String [Instr]
   deriving (Eq, Show)
@@ -134,6 +139,7 @@ printInstr :: Instr -> String
 printInstr i = case i of
   BinOp s o1 o2 -> binop s o1 o2
   Call s -> "call " ++ s
+  Jump name s -> name ++ " " ++ s
   Syscall -> "syscall"
   Push o -> unop "push" o
   Idiv o -> unop "idiv" o
@@ -160,37 +166,64 @@ constructor name arity = Label name $ mkFunc $ \xs ->
   let xs' = take arity xs in
   [ Push (Reg x) | x <- reverse xs' ]
   ++ callFunc "malloc" [Imm (8 * (fromIntegral arity + 1))] (\addr ->
-  movl (Imm (hash name)) (Mem 0 addr) : 
+  movq (Imm (hash name)) (Mem 0 addr) : 
     [ Pop (Mem (8 * i) addr) | i <- take arity [1..] ]
   )
-  where
-  hash :: String -> Int32
-  hash = foldl' (\h c -> 33*h `B.xor` fromIntegral (fromEnum c)) 5381
+
+hash :: String -> Int32
+hash = foldl' (\h c -> 33*h `B.xor` fromIntegral (fromEnum c)) 5381
 
 func :: String -> FuncDefn -> [CDecl]
 func fname (FuncDefn args _ expr) = flip evalState initState $ do
   --traceShow expr' True `seq` return ()
   loads <- zipWithM newVar args' (map Reg funcRegs)
-  (decls, instrs) <- ff expr' 
-  cleanup <- mkCleanup
-  return (Label fname (loads ++ instrs ++ cleanup ++ [Ret]) : decls)
+  (decls, instrs) <- ff fname expr' 
+  instrs' <- tailCall instrs
+  return (Label fname (loads ++ instrs') : decls)
   where
-  ff e = case e of
+  tailCall instrs = do
+    cleanup <- mkCleanup
+    return (instrs ++ cleanup ++ [Ret])
+  ff lbl e = case e of
     CInt i -> return $ ([], callFunc "mkint" [Imm i] (\_ -> []))
     CStr lab str -> return ([Label lab [Ascii (str ++ "\\0")]]
       , [mov (Global lab) (Reg RAX)])
     CVar v -> do
       oper <- getVar v
       return ([], [mov oper (Reg RAX)])
+    CLet v (CVar v1) e -> dupVar v v1 >> ff lbl e
     CLet v e1 e2 -> do
-      (decls, instrs) <- ff e1
+      (decls, instrs) <- ff (lbl ++ ".l") e1
       load <- newVar v (Reg RAX)
-      (decls2, instrs2) <- ff e2
+      (decls2, instrs2) <- ff (lbl ++ ".L") e2
       return (decls ++ decls2, instrs ++ [load] ++ instrs2)
     CAp f xs -> do
       d <- funcCall (toSymbolName f) xs (\_ -> return [])
       return ([], d)
-    
+    CCase v prods -> do
+      oper <- getVar v
+      (decls, instrs) <- fmap unzip $ mapM (mkCase lbl) prods
+      return (errorMsg : concat decls, 
+        [ mov oper (Reg RAX) ] ++ concat instrs ++ 
+        callFunc "_error" [Global errorLbl] (\_ -> [])
+        )
+  
+  mkCase lbl (Production (Pattern (NDataCon constr) vars) expr) = do
+    state <- get
+    loads <- zipWithM f [1..] vars
+    (decls, instrs) <- ff lbl' expr
+    instrs' <- tailCall (loads ++ instrs)
+    put state
+    return ( Label lbl' instrs' : decls ,
+      [ cmpl (Imm (hash constr)) (Mem 0 RAX)
+      , je lbl' ] )
+    where
+    lbl' = lbl ++ "." ++ constr
+    f i (NTerm v) = newVar v (Mem (8 * i) RAX)
+
+  errorLbl = fname ++ ".err"
+  errorMsg = Label errorLbl [ Ascii ("Pattern matching failure in function '"
+    ++ fname ++ "'.\\0") ]
   args' = [ n | TypedIdent (NTerm n) _ <- args ]
   expr' = toCExpr (S.fromList args') expr
 
@@ -200,9 +233,23 @@ intOp op = mkFunc $ \(x:y:_) ->
   , op (Mem 0 y) (Reg RDI)
   ] ++ callFunc "mkint" [Reg RDI] (\_ -> [])
 
+cmpOp :: String -> [Instr]
+cmpOp trueCond = mkFunc $ \(x:y:_) ->
+    [ mov (Mem 0 x) (Reg x)
+    , cmp (Mem 0 y) (Reg x)
+    , Jump trueCond "True"
+    , Jump "jmp" "False"
+    ]
+
 intOps :: [CDecl]
 intOps = [ Label (toSymbolName x) (intOp y)
   | (x, y) <- [ ("_+", add), ("_-", sub), ("_*", imul) ]
+  ]
+
+cmpOps :: [CDecl]
+cmpOps = [ Label (toSymbolName x) (cmpOp y)
+  | (x, y) <- [ ("_<", "jl"), ("_<=", "jle"), ("_==", "je")
+              , ("_>=", "jge"), ("_>", "jg") ]
   ]
 
 divOp :: CDecl
@@ -227,7 +274,15 @@ mkCleanup = do
     else []
 
 initState :: CompileState
-initState = CompileState M.empty 0 tempRegs
+initState = CompileState M.empty 0 [] --tempRegs
+
+dupVar :: String -> String -> Compile ()
+dupVar new old = do
+  CompileState vars stacksize freeRegs <- get
+  oper <- getVar old
+  put (CompileState (M.insert new oper vars) stacksize freeRegs)
+  
+  
 
 newVar :: String -> Oper -> Compile Instr
 newVar n oldOper = do
@@ -284,7 +339,7 @@ outint =
     , Ret
     ]
   , Label "intFormat"
-    [ Asciz "%ld\\n" ]
+    [ Asciz "%ld" ]
   ]
 
 outstring :: CDecl
@@ -293,6 +348,32 @@ outstring = Label "out_string"
   , Call "printf"
   , Ret
   ]
+
+arrayOps :: [CDecl]
+arrayOps =
+  [ Label "set" $ ($ funcRegs) $ \(arr : pos : val : _) -> 
+    [ mov (Mem 0 pos) (Reg R12)
+    , imul (Imm 8) (Reg R12)
+    , add (Reg R12) (Reg arr)
+    , mov (Reg val) (Mem 0 arr)
+    , Jump "jmp" "Unit" ]
+  , Label "get" $ mkFunc $ \(arr : pos : _) ->
+    [ mov (Mem 0 pos) (Reg R12)
+    , imul (Imm 8) (Reg R12)
+    , add (Reg R12) (Reg arr)
+    , mov (Mem 0 arr) (Reg RAX)
+    ]
+  , Label "makeArray" $ mkFunc $ \(size : defVal : _) -> 
+    [ Push (Reg size)
+    , Push (Reg defVal)
+    , imul (Imm 8) (Reg size) ]
+    ++ callFunc "malloc" [Reg size] (\arr -> 
+       [Pop (Reg R13), Pop (Reg R12), Push (Reg arr)] ++ 
+       callFunc "setAll" [Reg arr, Reg R12, Reg R13] (\_ -> 
+         [Pop (Reg RAX)]))
+  ]
+
+    
 
 errorDecls :: [CDecl]
 errorDecls = [ Label "_error"
@@ -307,18 +388,28 @@ errorDecls = [ Label "_error"
   , Label "_error.msg" [ Asciz "Error: %s\\n" ]
   ]
 
+primOps :: [CDecl]
+primOps = mkint : outstring : divOp : outint ++ intOps ++ cmpOps ++ arrayOps
+  ++ errorDecls
+
 prims :: IO ()
 prims = mapM_ (putStrLn . printCDecl) 
   (
-  constructor "cons" 2 : mkint : outstring : divOp : outint ++ intOps
+  constructor "Cons" 2 : constructor "True" 0 : constructor "False" 0 
+  : constructor "Unit" 0 
+  : primOps
   ++ 
   func "main" (FuncDefn [] Nothing 
-    (EAp Func "seq"
-      [ EAp Func "out_string" [EStr "blahblah" ] ,
+    (ECase (EAp Func "_<" [EInt 0, EInt 1]) 
+    [ Production (Pattern (NDataCon "True") []) 
+      ( EAp Func "out_string" [EStr "blahblah\\n" ] )
+    , Production (Pattern (NDataCon "False") [])
+      (
     (EAp Func "seq" 
       [ EAp Func "out_int" [EAp Func "_+" [EInt 1, EInt 2]]
       , EAp Func "out_string" [EStr "Hello, world!\\n"] 
       ] 
+    )
     )
     ]
     )
@@ -326,8 +417,13 @@ prims = mapM_ (putStrLn . printCDecl)
   ++ func "seq" (FuncDefn 
     [TypedIdent (NTerm "x") Nothing
     , TypedIdent (NTerm "y") Nothing] Nothing (EVar "y"))
-  ++ errorDecls
   )
+
+compileDecl :: Decl -> [CDecl]
+compileDecl d = case d of
+  DataDecl _ (DataDefn _ alts) ->
+    [ constructor name (length args) | DataAlt (NDataCon name) args <- alts ]
+  FuncDecl (NTerm fname) funcDefn -> func fname funcDefn
 
 toSymbolName :: String -> String
 toSymbolName = concatMap f where

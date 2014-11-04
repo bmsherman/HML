@@ -27,7 +27,7 @@ tokens :-
   ">>"                                  { lex FuncT }
   : | ";" | "," | "|" | "=>"            { lex Ctrl }
   [\( \) \{ \}] | "[" | "]"             { lex Delim }
-  \" ([^\"])* \"                        { lex String }
+  \" ([^\"])* \"                        { lex (String . init . tail) }
   "data" | "case" | "of" | "let" | "in" { lex Keyword }
   $lower [$alpha $digit \_ \']*         { lex LName }
   $upper [$alpha $digit \_ \']*         { lex UName }

@@ -1,0 +1,36 @@
+fact (x : Int) = case x <= 0
+    {  True()  => 1
+    | False() => x * fact(x - 1) };
+    
+fibsHelper (acc1 : Int , acc2 : Int, n : Int) : Int =
+  case n <= 0
+    { True()  => acc2
+    | False() => fibsHelper(acc2, acc1 + acc2, n - 1)
+    };
+
+fibs(n : Int) : Int = case n <= 1
+  { True()  => 1
+  | False() => fibsHelper(1 , 1, n - 1)
+  };
+
+data List(a) of Nil() | Cons(a, List(a));
+
+allFibs(start : Int, end : Int) : List(Int) = case start < end
+  { True() => Cons(fibs(start), allFibs(start + 1, end))
+  | False() => Nil()
+  };
+
+printList(xs : List(Int)) = case xs
+  { Nil() => Unit()
+  | Cons(y, ys) => out_int(y) >> out_string("\n") >> printList(ys)
+  };
+
+length(xs) = case xs
+  { Nil() => 0
+  | Cons(y, ys) => 1 + length(ys)
+  };
+
+printAllFibs(n) = out_int(fibs(n)) >> out_string("\n")
+  >> printAllFibs(n + 1);
+
+main() = printAllFibs(0);

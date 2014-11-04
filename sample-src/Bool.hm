@@ -17,3 +17,5 @@ eqBool(x, y) = case x
   { True() => y
   | False() => not(y)
   };
+
+main() = or(False(), True());

@@ -38,8 +38,10 @@ primContext = Context M.empty primOps M.empty
 -- | A typing context that includes built-in functions from a Prelude
 -- code file
 preludeContext :: Context
-preludeContext = ctxt
+preludeDecls :: [Decl]
+(preludeContext, preludeDecls) = (ctxt, decls)
   where
   preludeSrc = unsafePerformIO $ 
     readFile =<< getDataFileName "Prelude.hm"
-  Right (_, (ctxt, _)) = parseDecls primContext preludeSrc
+  Right (decls, (ctxt, _)) = parseDecls primContext preludeSrc
+
