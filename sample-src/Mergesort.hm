@@ -11,13 +11,13 @@ dealHelper(tf, ls, rs, xs) = case xs
 
 deal(xs) = dealHelper(True(), [], [], xs);
 
-merge(xs, ys) = case xs
+merge(lte, xs, ys) = case xs
   { Nil() => ys
   | Cons(a, as) => case ys
     { Nil() => xs
-    | Cons(b, bs) => case a <= b
-      { True() => Cons(a, merge(as, ys))
-      | False() => Cons(b, merge(xs, bs))
+    | Cons(b, bs) => case lte(a, b)
+      { True() => Cons(a, merge(lte, as, ys))
+      | False() => Cons(b, merge(lte, xs, bs))
       }
     }
   };
@@ -30,10 +30,15 @@ isSmall(xs) = case xs
     }
   };
 
-mergesort(xs) = case isSmall(xs) 
+mergesort(lte, xs) = case isSmall(xs) 
   { True() => xs
   | False() => case deal(xs)
-    { And(ls, rs) => merge( mergesort(ls) , mergesort(rs) ) }
+    { And(ls, rs) => merge(lte, mergesort(lte, ls) , mergesort(lte, rs) ) }
   };
 
-main() = mergesort([13, 5, 2, 10, 3]);
+listLine(print, xs) = case xs
+  { Nil() => 0
+  | Cons(y, ys) => print(y) >> out_string("\n") >> listLine(print, ys)
+  };
+
+main() = listLine(out_int, mergesort(lteInt, [13, 5, 2, 10, 3]));

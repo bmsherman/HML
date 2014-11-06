@@ -1,31 +1,44 @@
 data Bool() of True() | False();
 data Unit() of Unit();
 
-seq(x, y) = y;
+seq(x, y) = y; -- >>
 
+-- 'error' is specially compiled. It prints the message and then
+-- aborts the program.
 error(message : String) : a = case message {};
 undefined() = error("undefined");
 
 -- Integer operations
-plus(x : Int, y : Int) : Int = undefined();
-minus(x : Int, y : Int) : Int = undefined();
-times(x : Int, y : Int) : Int = undefined();
-div(x : Int, y : Int) : Int = undefined();
-negate(x : Int) : Int = undefined();
+-- All are specially compiled
+plus(x : Int, y : Int) : Int = undefined(); -- +
+minus(x : Int, y : Int) : Int = undefined(); -- -
+times(x : Int, y : Int) : Int = undefined(); -- *
+div(x : Int, y : Int) : Int = undefined(); -- /
+negate(x : Int) : Int = undefined(); -- ~
 
-ltInt(x : Int, y : Int) : Bool() = undefined();
-lteInt(x : Int, y : Int) : Bool() = undefined();
-eqInt(x : Int, y : Int) : Bool() = undefined();
-gteInt(x : Int, y : Int) : Bool() = undefined();
-gtInt(x : Int, y : Int) : Bool() = undefined();
+ltInt(x : Int, y : Int) : Bool() = undefined(); -- <
+lteInt(x : Int, y : Int) : Bool() = undefined(); -- <=
+eqInt(x : Int, y : Int) : Bool() = undefined(); -- ==
+gteInt(x : Int, y : Int) : Bool() = undefined(); -- >=
+gtInt(x : Int, y : Int) : Bool() = undefined(); -- >
 
 -- Arrays
+
+-- Arrays use 0-based indexing. Out-of-bounds accesses are not checked, and so
+-- are considered to cause undefined behavior. If you'd like bounds-checking,
+-- you can always implement a wrapper on top of 'Array'.
 data Array(a);
 
+-- Make a new array of size 'size', initializing all elements of the array
+-- to have value 'defaultVal'. Internally, 'makeArray' simply allocates
+-- enough space and then calls 'setAll' to set the default value.
+-- (specially compiled)
 makeArray(size : Int, defaultVal : a) : Array(a) = undefined();
 
+-- (specially compiled) arr[pos] <- val
 set(arr : Array(a), pos : Int, val : a) : Unit() = undefined();
 
+-- (specially compiled) arr[pos]
 get(arr : Array(a), pos : Int) : a = undefined();
 
 setAll(arr : Array(a), size : Int, val : a) : Unit() = 
@@ -39,6 +52,12 @@ setAllHelper(arr : Array(a), size : Int, val : a, idx : Int) =
 
 
 -- IO 
+
+-- (specially compiled) Print a string to standard output.
 out_string(x : String) : Int = undefined();
+
+-- (specially compiled) Print an integer to standard output.
 out_int(x : Int) : Int = undefined();
-in_int() : Int = undefined();
+
+-- (Not yet implemented)
+in_int() : Int = error("'in_int' is not yet implemented");

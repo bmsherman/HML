@@ -1,10 +1,10 @@
 data List(a) of Nil() | Cons(a, List(a));
 data And(a, b) of And(a, b);
 
-partition(k, xs) = case xs
+partition(lte, k, xs) = case xs
   { Nil() => And(Nil(), Nil())
-  | Cons(y, ys) => case partition(k, ys)
-    { And(as, bs) => case y <= k
+  | Cons(y, ys) => case partition(lte, k, ys)
+    { And(as, bs) => case lte(y, k)
       { True() => And(Cons(y, as), bs)
       | False() => And(as, Cons(y, bs))
       }
@@ -16,12 +16,16 @@ append(xs,  ys : List(a)) = case xs : List(a)
   | Cons(z, zs) => Cons(z, append(zs,ys))
   };
 
-quicksort(xs) = case xs
+quicksort(lte, xs) = case xs
   { Nil() => Nil()
-  | Cons(y, ys) => case partition(y, ys)
-    { And(ls, rs) => append(quicksort(ls), Cons(y, quicksort(rs))) }
+  | Cons(y, ys) => case partition(lte, y, ys)
+    { And(ls, rs) => append(quicksort(lte, ls), Cons(y, quicksort(lte, rs))) }
   };
 
+listLine(print, xs) = case xs
+  { Nil() => 0
+  | Cons(y,ys) => print(y) >> out_string("\n") >> listLine(print, ys)
+  };
 
-main() = quicksort([13, 5, 2, 10, 6]);
+main() = listLine(out_int, quicksort(lteInt, [13, 5, 2, 10, 6]));
 
