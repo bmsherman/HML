@@ -1,20 +1,15 @@
 data List(a) of Nil() | Cons(a, List(a));
 
-printList(xs) = case xs
-  { Nil() => Unit()
-  | Cons(y, ys) => out_int(y) >> out_string("\t") >> printList(ys)
+map(f, xs) = case xs
+  { Nil() => Nil()
+  | Cons(y, ys) => Cons( f(y), map(f, ys))
   };
+
+itemPrinter(x) = out_int(x) >> out_string("\t");
 
 setIt(arr,pos) = set(arr, pos, [1,2,3]);
 
 
 main() = let arr = makeArray(10, Nil()) in
-  setIt(arr,3) >> printList(get(arr,3));
+  setIt(arr,3) >> map(itemPrinter, (get(arr,3)));
 
-main2() = let arr = makeArray(10, 2) in
-  out_int(get(arr, 0));
-
---case get(arr, 5)
---    { True() => out_string("True\n")
---    | False() => out_string("False\n")
---    };

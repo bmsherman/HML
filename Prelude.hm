@@ -3,7 +3,21 @@ data Unit() of Unit();
 
 seq(x, y) = y;
 
-undefined() = case 0 {};
+error(message : String) : a = case message {};
+undefined() = error("undefined");
+
+-- Integer operations
+plus(x : Int, y : Int) : Int = undefined();
+minus(x : Int, y : Int) : Int = undefined();
+times(x : Int, y : Int) : Int = undefined();
+div(x : Int, y : Int) : Int = undefined();
+negate(x : Int) : Int = undefined();
+
+ltInt(x : Int, y : Int) : Bool() = undefined();
+lteInt(x : Int, y : Int) : Bool() = undefined();
+eqInt(x : Int, y : Int) : Bool() = undefined();
+gteInt(x : Int, y : Int) : Bool() = undefined();
+gtInt(x : Int, y : Int) : Bool() = undefined();
 
 -- Arrays
 data Array(a);

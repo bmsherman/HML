@@ -22,6 +22,7 @@ tokens :-
   "--".*                        ;
   $digit+                               { lex (Int . read) }
   "="                                   { lexc Equals }
+  "->"                                  { lexc FuncArr }
   "+" | "-" | "*" | "/" | "~"           { lex FuncT }
   "==" | "<=" | "<" | ">" | ">="        { lex FuncT }
   ">>"                                  { lex FuncT }
@@ -44,6 +45,7 @@ data Token =
   | Keyword String
   | FuncT String
   | Equals
+  | FuncArr
   | TokenEOF
 
 instance Show Token where
@@ -56,6 +58,7 @@ instance Show Token where
     Ctrl s -> s
     Keyword s -> s
     Equals -> "="
+    FuncArr -> "->"
     TokenEOF -> "EOF"
     FuncT s -> s
 

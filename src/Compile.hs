@@ -71,6 +71,7 @@ toCExpr usedVars e = flip evalState (0, usedVars `S.union` varsInExp e) (f e ) w
 data Instr = 
     BinOp String Oper Oper
   | Call String
+  | CallR Register
   | Jump String String
   | Syscall
   | Push Oper
@@ -139,6 +140,7 @@ printInstr :: Instr -> String
 printInstr i = case i of
   BinOp s o1 o2 -> binop s o1 o2
   Call s -> "call " ++ s
+  CallR reg -> "call *" ++ show reg
   Jump name s -> name ++ " " ++ s
   Syscall -> "syscall"
   Push o -> unop "push" o
@@ -186,8 +188,9 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
     return (instrs ++ cleanup ++ [Ret])
   ff lbl e = case e of
     CInt i -> return $ ([], callFunc "mkint" [Imm i] (\_ -> []))
-    CStr lab str -> return ([Label lab [Ascii (str ++ "\\0")]]
-      , [mov (Global lab) (Reg RAX)])
+    CStr lab str -> let lbl' = lbl ++ lab in
+      return ([Label lbl' [Ascii (str ++ "\\0")]]
+      , [mov (Global lbl') (Reg RAX)])
     CVar v -> do
       oper <- getVar v
       return ([], [mov oper (Reg RAX)])
@@ -198,14 +201,18 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
       (decls2, instrs2) <- ff (lbl ++ ".L") e2
       return (decls ++ decls2, instrs ++ [load] ++ instrs2)
     CAp f xs -> do
-      d <- funcCall (toSymbolName f) xs (\_ -> return [])
+      moper <- mGetVar f
+      let callOps = case moper of 
+            Nothing -> [Call (toSymbolName f)]
+            Just oper -> [movq oper (Reg R12), CallR R12]
+      d <- funcCall callOps xs (\_ -> return [])
       return ([], d)
     CCase v prods -> do
       oper <- getVar v
       (decls, instrs) <- fmap unzip $ mapM (mkCase lbl) prods
       return (errorMsg : concat decls, 
         [ mov oper (Reg RAX) ] ++ concat instrs ++ 
-        callFunc "_error" [Global errorLbl] (\_ -> [])
+        callFunc "error" [Global errorLbl] (\_ -> [])
         )
   
   mkCase lbl (Production (Pattern (NDataCon constr) vars) expr) = do
@@ -243,17 +250,17 @@ cmpOp trueCond = mkFunc $ \(x:y:_) ->
 
 intOps :: [CDecl]
 intOps = [ Label (toSymbolName x) (intOp y)
-  | (x, y) <- [ ("_+", add), ("_-", sub), ("_*", imul) ]
+  | (x, y) <- [ ("plus", add), ("minus", sub), ("times", imul) ]
   ]
 
 cmpOps :: [CDecl]
-cmpOps = [ Label (toSymbolName x) (cmpOp y)
-  | (x, y) <- [ ("_<", "jl"), ("_<=", "jle"), ("_==", "je")
-              , ("_>=", "jge"), ("_>", "jg") ]
+cmpOps = [ Label (toSymbolName (x ++ "Int")) (cmpOp y)
+  | (x, y) <- [ ("lt", "jl"), ("lte", "jle"), ("eq", "je")
+              , ("gt", "jge"), ("gte", "jg") ]
   ]
 
 divOp :: CDecl
-divOp = Label (toSymbolName "_/") $ mkFunc $ \(x:y:_) ->
+divOp = Label (toSymbolName "div") $ mkFunc $ \(x:y:_) ->
   [ xor (Reg RDX) (Reg RDX)
   , mov (Mem 0 x) (Reg RAX)
   , mov (Mem 0 y) (Reg RSI)
@@ -301,9 +308,15 @@ newVar n oldOper = do
   f (Mem i RSP) = Mem (8 + i) RSP
   f x = x
 
+mGetVar :: String -> Compile (Maybe Oper)
+mGetVar n = fmap (M.lookup n . vars) get
+
 getVar :: String -> Compile Oper
-getVar n = fmap ((M.! n) . vars) get
-    
+getVar n = do
+  mx <- mGetVar n
+  return $ case mx of
+    Just o -> o
+    Nothing -> Global n
 
 type Compile = State CompileState
 
@@ -323,11 +336,11 @@ callFunc fname opers andThen = catMaybes (zipWith maybeMov opers funcRegs)
   maybeMov (Reg r) r' | r == r' = Nothing
   maybeMov o r = Just (mov o (Reg r))
 
-funcCall :: String -> [String] -> (Register -> Compile [Instr])
+funcCall :: [Instr] -> [String] -> (Register -> Compile [Instr])
   -> Compile [Instr]
-funcCall fname args andThen = do
+funcCall callOps args andThen = do
   opers <- mapM getVar args
-  ((zipWith mov opers (map Reg funcRegs) ++ [Call fname]) ++) <$> andThen RAX
+  ((zipWith mov opers (map Reg funcRegs) ++ callOps) ++) <$> andThen RAX
 
 outint :: [CDecl]
 outint = 
@@ -376,16 +389,16 @@ arrayOps =
     
 
 errorDecls :: [CDecl]
-errorDecls = [ Label "_error"
+errorDecls = [ Label "error"
   [ xor (Reg RAX) (Reg RAX)
   , mov (Reg RDI) (Reg RSI)
-  , mov (Global "_error.msg") (Reg RDI)
+  , mov (Global "error.msg") (Reg RDI)
   , Call "printf"
   , mov (Imm 60) (Reg RAX)
   , xor (Reg RDI) (Reg RDI)
   , Syscall
   ]
-  , Label "_error.msg" [ Asciz "Error: %s\\n" ]
+  , Label "error.msg" [ Asciz "Error: %s\\n" ]
   ]
 
 primOps :: [CDecl]
@@ -428,12 +441,4 @@ compileDecl d = case d of
 toSymbolName :: String -> String
 toSymbolName = concatMap f where
   f '\'' = ".P"
-  f '>' = ".gt"
-  f '<' = ".lt"
-  f '=' = ".eq"
-  f '+' = ".plus"
-  f '-' = ".minus"
-  f '~' = ".negate"
-  f '*' = ".times"
-  f '/' = ".div"
   f x = [x]

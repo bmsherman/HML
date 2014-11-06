@@ -27,6 +27,7 @@ data Expr = EInt Int32            -- ^ constant integer
 data TyExpr = IntTy | StrTy  -- ^ the types of integers and strings
   | TyVar TyVar              -- ^ type variable
   | TAp NTyCon [TyExpr]      -- ^ type constructor application
+  | TArr [TyExpr] TyExpr
   deriving Show
 
 -- | A type variable specifies its flexibility (how type inference ought to
@@ -47,8 +48,10 @@ pprintTyExpr x = case x of
   IntTy -> "Int"
   StrTy -> "String"
   TyVar (TV _ s) -> s
-  TAp (NTyCon tycon) exprs -> tycon ++ "(" 
-    ++ intercalate ", " (map pprintTyExpr exprs) ++ ")"
+  TArr argTys retTy -> pList argTys ++ " -> " ++ pprintTyExpr retTy
+  TAp (NTyCon tycon) exprs -> tycon ++ pList exprs
+  where
+  pList xs = "(" ++ intercalate ", " (map pprintTyExpr xs) ++ ")"
 
 -- | Data type declaration
 data DataDefn = DataDefn [NTerm] [DataAlt]

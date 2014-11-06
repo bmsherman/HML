@@ -1,12 +1,60 @@
 data List(a) of Nil() | Cons(a, List(a));
 
-sum(xs : List(Int)) : Int = case xs
-  { Nil() => 0 
-  | Cons(y, ys) => y + sum(ys) };
-  
 append(xs : List(a), ys : List(a)) : List(a) = case xs
   { Nil() => ys
   | Cons(z,zs) => Cons(z, append(zs,ys))
   };
 
-main() : Int = sum([1,3,6,10,15]);
+head(xs) = case xs { Cons(y, ys) => y };
+
+tail(xs) = case xs { Cons(y, ys) => ys };
+
+lastHelper(x, xs) = case xs
+  { Nil() => x
+  | Cons(y, ys) => lastHelper(y, ys)
+  };
+last(xs) = case xs
+  { Nil() => error("last: empty list")
+  | Cons(y, ys) => lastHelper(y, ys)
+  };
+
+initHelper(x, xs) = case xs
+  { Nil() => Cons(x, Nil())
+  | Cons(y, ys) => Cons(x, initHelper(y, ys))
+  };
+
+init(xs) = case xs
+  { Nil() => error("init: empty list")
+  | Cons(y, ys) => initHelper(y, ys)
+  };
+
+null(xs) = case xs
+  { Nil() => True()
+  | Cons(y, ys) => False()
+  };
+
+length(xs) = case xs
+  { Nil() => 0
+  | Cons(y, ys) => 1 + length(ys)
+  };
+
+map(f, xs) = case xs
+  { Nil() => Nil()
+  | Cons(y, ys) => Cons( f(y) , map(f, ys) )
+  };
+
+reverseHelper(acc, xs) = case xs
+  { Nil() => acc
+  | Cons(y, ys) => reverseHelper( Cons(y, acc), ys )
+  };
+
+reverse(xs) = reverseHelper(Nil(), xs);
+
+foldr(f : (a, b) -> b, z : b, xs : List(a)) : b = case xs
+  { Nil() => z
+  | Cons(y, ys) => f( y, foldr(f, z, ys))
+  };
+
+sum(xs) = foldr(plus, 0, xs);
+product(xs) = foldr(times, 1, xs);
+ 

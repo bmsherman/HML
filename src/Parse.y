@@ -42,6 +42,7 @@ import Typecheck
   int              { Int $$ }
   string           { String $$ }
   '='              { Equals  }
+  '->'             { FuncArr }
   data             { Keyword "data" }
   case             { Keyword "case" }
   of               { Keyword "of"   }
@@ -83,12 +84,12 @@ Expr :: { Expr }
   | lname '(' ExprList ')' { EAp Func $1 $3 }
   | case Expr '{' ProdList '}' { ECase $2 $4 }
   | let TypedIdent '=' Expr in Expr { ELet $2 $4 $6 }
-  | Expr '+' Expr { (primFunc "+") [$1, $3] }
-  | Expr '-' Expr { (primFunc "-") [$1, $3] }
-  | Expr '*' Expr { (primFunc "*") [$1, $3] }
-  | Expr '/' Expr { (primFunc "/") [$1, $3] }
-  | Expr intbincmp Expr { (primFunc (unFunc $2)) [$1, $3] }
-  | '~' Expr { (primFunc "~") [$2] }
+  | Expr '+' Expr { EAp Func "plus" [$1, $3] }
+  | Expr '-' Expr { EAp Func "minus" [$1, $3] }
+  | Expr '*' Expr { EAp Func "times" [$1, $3] }
+  | Expr '/' Expr { EAp Func "div" [$1, $3] }
+  | Expr intbincmp Expr { EAp Func (cmpFunc $2) [$1, $3] }
+  | '~' Expr { EAp Func "negate" [$2] }
   | Expr '>>' Expr { EAp Func "seq" [$1, $3] }
   | Expr ':' TyExpr { Typed $1 $3 }
   | '(' Expr ')' { $2 }
@@ -108,6 +109,7 @@ TyExpr :: { TyExpr }
   | strty { StrTy }
   | lname { TyVar (TV Flex $1) }
   | uname '(' TyExprList ')' { TAp (NTyCon $1) $3 }
+  | '(' TyExprList ')' '->' TyExpr { TArr $2 $5 }
 
 TyExprList :: { [TyExpr] }
  :    { [] }
@@ -167,9 +169,6 @@ Typing :: { Maybe TyExpr }
 
 {
 
-primFunc :: String -> [Expr] -> Expr
-primFunc s = EAp Func ('_' : s)
-
 processDecl :: Decl -> Alex Decl
 processDecl d = do
   (ctxt, errors) <- alexGetUserState
@@ -190,8 +189,13 @@ processDecl d = do
 lexwrap :: (Token -> Alex a) -> Alex a
 lexwrap = (alexMonadScan >>=)
 
-unFunc :: Token -> String
-unFunc (FuncT x) = x
+cmpFunc :: Token -> String
+cmpFunc (FuncT x) = (++ "Int") $ case x of
+  "<" -> "lt"
+  "<=" -> "lte"
+  "==" -> "eq"
+  ">=" -> "gte"
+  ">" -> "gt"
 
 prefixPos :: Alex String
 prefixPos = do

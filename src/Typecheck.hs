@@ -39,7 +39,7 @@ dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
   mLefts  [ left (("in data constructor '" ++ dcon ++ "', ") ++) 
              $ kindCheck tycs' e
              | DataAlt (NDataCon dcon) es <- dataAlts, e <- es ]
-  return (Context M.empty funcs (M.singleton tyName arity))
+  return (Context funcs (M.singleton tyName arity))
   where
   mLefts = go [] where
     go acc [] = if null acc then Right () else Left (reverse acc)
@@ -49,7 +49,7 @@ dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
   tycs' = M.insert tyName arity tycs
   arity = S.size varSet
   varSet = S.fromList vars
-  funcs = M.fromList [ (dcon, (DataCon, Q varSet (x, tyExpr)))
+  funcs = M.fromList [ (dcon, Q varSet (TArr x tyExpr))
     | DataAlt (NDataCon dcon) x <- dataAlts ]
   varsE = map (TyVar . TV Flex) vars
   tyExpr = TAp (NTyCon tyName) varsE
@@ -58,15 +58,13 @@ type Arity = Int
 data Context  = Context
   { terms  :: Map String (Quantified TyExpr)
      -- ^ bound variables and their types (local)
-  , funcs  :: Map String (Inj, Quantified ([TyExpr], TyExpr))
-     -- ^ functions and data constructors and their types (global)
   , tycons :: Map String Arity
      -- ^ type constructors and their kinds (specified entirely by arity)
   }
 
 -- | A totally empty typing context
 emptyContext :: Context
-emptyContext = Context M.empty M.empty M.empty
+emptyContext = Context M.empty M.empty
 
 instance Show Context where
   show = pprintContext
@@ -87,9 +85,9 @@ kindCheck tycs ty = case ty of
 
 -- | pretty-print a typing context
 pprintContext :: Context -> String
-pprintContext (Context ts fs tycs) = intercalate "\n" 
+pprintContext (Context ts tycs) = intercalate "\n" 
   . intercalate [""]
-  $ [mp ppTyCons tycs, mp ppFunc fs, mp ppTerm ts]
+  $ [mp ppTyCons tycs, mp ppTerm ts]
   where
   mp f = M.elems . M.mapWithKey f
   ppTerm name (Q vars ty) = ppQuantified vars ++ name ++ " : " 
@@ -107,14 +105,13 @@ pprintContext (Context ts fs tycs) = intercalate "\n"
 -- | Merge two disjoint typing contexts. Throw an error if there are any
 -- overlapping names.
 unionC :: Context -> Context -> Either [String] Context
-unionC (Context a b c) (Context a' b' c') = if M.null iAll
-  then Right $ Context (M.union a a') (M.union b b') (M.union c c')
+unionC (Context a b) (Context a' b') = if M.null iAll
+  then Right $ Context (M.union a a') (M.union b b') 
   else Left (M.elems iAll)
   where
   ia = M.intersectionWithKey err a a'
   ib = M.intersectionWithKey err b b'
-  ic = M.intersectionWithKey err c c'
-  iAll = M.unions [ia, ib, ic]
+  iAll = M.unions [ia, ib]
   err key _ _ = "Duplicate definition for name '" ++ key ++ "'"
 
 -- | Intended to put prenex quantifiers on variable and function type
@@ -169,6 +166,11 @@ plural :: Int -> String -> String
 plural 1 s = s
 plural n s = s ++ "s"
 
+failSubTy :: FailCont -> TyExpr -> TyExpr -> FailCont
+failSubTy fail ty1 ty2  = appFail fail ("can't match expected type " 
+  ++ pprintTyExpr ty1
+  ++ " with actual type " ++ pprintTyExpr ty2 ++ ", specifically, ")
+
 -- | Unify two type expressions
 unify :: FailCont
   -> TyExpr -> TyExpr -> TypeCheck TyExpr
@@ -184,12 +186,20 @@ unify fail ty1@(TAp tcon1@(NTyCon n1) e1s)
     return (TAp tcon1 argTys)
   else fail' ("expected type constructor " ++ n1 
         ++ " but was given " ++ n2)
-  where
-  fail' = appFail fail ("can't match expected type " ++ pprintTyExpr ty1
-    ++ " with actual type " ++ pprintTyExpr ty2 ++ ", specifically, ")
+  where fail' = failSubTy fail ty1 ty2
 unify fail (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
   then varBind fail t (TyVar u)
   else varBind fail u (TyVar t)
+unify fail ty1@(TArr args1 ret1) ty2@(TArr args2 ret2) = do
+  args <- case strictZipWith (unify' fail') args1 args2 of
+    Left (i, j) -> fail' ("expected function type " ++ pprintTyExpr ty1 
+      ++ " has " ++ show i
+      ++ " arguments, but actual function type " ++ pprintTyExpr ty2
+      ++ " has " ++ show j)
+    Right toUnion -> sequence toUnion
+  ret <- unify' fail' ret1 ret2
+  return (TArr args ret)
+  where fail' = failSubTy fail ty1 ty2
 unify fail (TyVar u) t = varBind fail u t
 unify fail t (TyVar u) = varBind fail u t
 unify _ IntTy IntTy = return IntTy
@@ -228,6 +238,7 @@ freeVars :: TyExpr -> Set String
 freeVars ty = case ty of
   TyVar (TV _ a) -> S.singleton a
   TAp dcon exprs -> S.unions (map freeVars exprs)
+  TArr argTys retTy -> S.unions (map freeVars (retTy : argTys))
   _ -> S.empty
 
 -- | General function for instnatiation a type expression for inference
@@ -240,11 +251,6 @@ instantiate flex mapf (Q vars expr) = do
 -- Instantiate the type of a simple expression
 instantiateE :: Quantified TyExpr -> TypeCheck TyExpr
 instantiateE = instantiate Flex id
-
--- Instantiate the type of a function
-instantiateFunc :: Quantified ([TyExpr], TyExpr) -> TypeCheck ([TyExpr], TyExpr)
-instantiateFunc = instantiate Flex mapf where
-  mapf f (argTys, retTy) = (map f argTys, f retTy)
 
 -- | State when performing Hindley-Milner type inference. The 'Int' is
 -- a counter intended to easily provide fresh variables. The 'Subst' is
@@ -272,17 +278,15 @@ ti fail ctxt e = case e of
     Just scheme -> do
       ty <- instantiateE scheme
       return ty
-  EAp inj fname exprs -> case M.lookup fname (funcs ctxt) of
+  EAp inj fname exprs -> case M.lookup fname (terms ctxt) of
     Nothing -> fail ("function '" ++ fname ++ "' not in scope")
-    Just (_, scheme) -> do
-      (argTys, retTy) <- instantiateFunc scheme
-      argTys2 <- zipWithM (\i -> ti (failF fname i) ctxt) 
+    Just scheme -> do
+      expTyExpr <- instantiateE scheme
+      argTys <- zipWithM (\i -> ti (failF fname i) ctxt) 
          [1 :: Int ..] exprs
-      case strictZipWith (unifyF fname) (zip [1..] argTys) argTys2 of
-        Left (i, j) -> fail ("function " ++ fname ++ " expects " ++ show i
-          ++ " arguments, but received " ++ show j)
-        Right toUnion -> sequence toUnion
-      return retTy
+      retTy <- newTyVar "b" Flex
+      TArr argTys' retTy' <- unify fail expTyExpr (TArr argTys retTy)
+      return retTy'
   ELet (TypedIdent (NTerm name) mty) assn expr -> do
     assnTy <- ti (appFail fail ("in let-expression assignment for variable '"
          ++ name ++ "', ")) ctxt $ case mty of
@@ -318,13 +322,11 @@ tiCase :: FailCont -> Context -> TyExpr -> Production Expr
        -> TypeCheck (TyExpr, TyExpr)
 tiCase fail ctxt ety 
   (Production (Pattern (NDataCon dcon) argNames) outExpr) = 
-    case M.lookup dcon (funcs ctxt) of
+    case M.lookup dcon (terms ctxt) of
       Nothing -> fail ("data constructor " ++ dcon ++
         " not in scope")
-      Just (Func, _) -> fail ("expected data constructor" ++
-        " in case alternative but found function " ++ dcon)
-      Just (DataCon, scheme) -> do
-        (argTys, retTy) <- instantiateFunc scheme
+      Just scheme -> do
+        TArr argTys retTy <- instantiateE scheme
         case strictZipWith zipper argNames argTys of
           Left (i, j) -> fail ("data constructor " ++ dcon ++
             " expects " ++ show j ++ " arguments but receives " ++ show i
@@ -344,8 +346,9 @@ funcCtxt :: Context -> NTerm -> FuncDefn -> Either String Context
 funcCtxt ctxt fname@(NTerm fn) fdef = 
   fmap f (elabFunction ctxt fname fdef)
   where
+  toFunc (Q vs (args, ret)) = Q vs (TArr args ret)
   f :: Quantified ([TyExpr], TyExpr) -> Context
-  f ty = Context M.empty (M.singleton fn (Func, ty)) M.empty
+  f ty = Context (M.singleton fn (toFunc ty)) M.empty
   elabFunction :: Context -> NTerm -> FuncDefn -> Either String 
     (Quantified ([TyExpr], TyExpr))
   elabFunction ctxt fname fdef = result
@@ -413,12 +416,18 @@ tiFunc :: Context -> NTerm -> FuncDefn
 tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
   funcTy <- createFuncTy fail fdef
   (vs, expRetTy, e) <- instantiate Rigid mapf funcTy
+  zipWithM_ (\i -> doKindCheck ("in argument " ++ show i ++ ", ") . snd) 
+    [1..] vs
+  doKindCheck "in return type, " expRetTy
   actRetTy <- ti fail (updateCtxt vs expRetTy) expr
   retTy <- unify' fail expRetTy actRetTy
   vs' <- mapM evalTy (map snd vs)
   let actFuncTy = generalize (vs', retTy)
   return actFuncTy
   where
+  doKindCheck failCtxt ty = case kindCheck (tycons ctxt) ty of
+    Left e -> (appFail fail failCtxt) e
+    Right () -> return ()
   fail s = throwE ("In function declaration '" ++ fname ++
     "', " ++ s)
   mapf f (args, retTy, exp) = (map (second f) args, f retTy
@@ -428,11 +437,10 @@ tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
     return (x, var)
   updateCtxt :: [(String, TyExpr)] -> TyExpr -> Context
   updateCtxt vs retTy = 
-    ctxt { terms = addTerms (terms ctxt)
-         , funcs = M.insert fname fdef (funcs ctxt) }
+    ctxt { terms = M.insert fname fdef (addTerms (terms ctxt)) }
     where
     addTerms = foldr (.) id $ map (\(x, y) -> M.insert x (Q S.empty y)) vs
-    fdef = (Func, Q S.empty (map snd vs, retTy))
+    fdef = Q S.empty (TArr (map snd vs) retTy)
  
 modifyTypesE :: (TyExpr -> TyExpr) -> Expr -> Expr
 modifyTypesE f = g where
@@ -454,8 +462,10 @@ runTypeCheck t = runState (runExceptT t) initTIState
 -- | Substitute a type variable name with a given expression
 -- in a type expression.
 subst :: String -> TyExpr -> (TyExpr -> TyExpr)
-subst a e ty = case ty of
-  TyVar (TV _ a') -> if a == a' then e else ty
-  TAp tycon exprs -> TAp tycon (map (subst a e) exprs)
-  _ -> ty
+subst a e = f where
+  f ty = case ty of
+    TArr argTys retTy -> TArr (map f argTys) (f retTy)
+    TyVar (TV _ a') -> if a == a' then e else ty
+    TAp tycon exprs -> TAp tycon (map f exprs)
+    _ -> ty
 
