@@ -10,6 +10,10 @@ data Array(a);
 
 makeArray(size : Int, defaultVal : a) : Array(a) = undefined();
 
+set(arr : Array(a), pos : Int, val : a) : Unit() = undefined();
+
+get(arr : Array(a), pos : Int) : a = undefined();
+
 setAll(arr : Array(a), size : Int, val : a) : Unit() = 
   setAllHelper(arr, size, val, 0);
 
@@ -18,10 +22,6 @@ setAllHelper(arr : Array(a), size : Int, val : a, idx : Int) =
     { True() => set(arr, idx, val) >> setAllHelper(arr, size, val, idx + 1)
     | False() => Unit()
     };
-
-set(arr : Array(a), pos : Int, val : a) : Unit() = undefined();
-
-get(arr : Array(a), pos : Int) : a = undefined();
 
 
 -- IO 
