@@ -50,6 +50,11 @@ reverseHelper(acc, xs) = case xs
 
 reverse(xs) = reverseHelper(Nil(), xs);
 
+replicate(n, x) = case n <= 0
+  { True() => Nil()
+  | False() => Cons(x, replicate(n - 1, x))
+  };
+
 foldr(f : (a, b) -> b, z : b, xs : List(a)) : b = case xs
   { Nil() => z
   | Cons(y, ys) => f( y, foldr(f, z, ys))

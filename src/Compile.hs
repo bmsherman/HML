@@ -45,9 +45,11 @@ toCExpr usedVars e = evalState (f e) (0, usedVars `S.union` varsInExp e)
       put (i', vs)
       return $ CStr ("str" ++ show i') s
     EVar v -> return $ CVar v
-    EAp _ f es -> do
+    EAp _ func es -> do
       (vs, lets) <- unzip <$> zipWithM funcArgs [1..] es
-      return $ foldr (.) id lets (CAp f vs)
+      case func of 
+        "seq" -> head lets <$> f (es !! 1) -- special inlining for seq
+        _ -> return $ foldr (.) id lets (CAp func vs)
     ECase e prods -> do
       v <- newV "scrut"
       e' <- f e
@@ -72,6 +74,7 @@ data Instr =
   | Call String
   | CallR Register
   | Jump String String
+  | JumpR String Register
   | Syscall
   | Push Oper
   | Pop Oper
@@ -132,6 +135,7 @@ printInstr i = case i of
   Call s -> "call " ++ s
   CallR reg -> "call *" ++ show reg
   Jump name s -> name ++ " " ++ s
+  JumpR name reg -> name ++ " *" ++ show reg
   Syscall -> "syscall"
   Push o -> unop "push" o
   Idiv o -> unop "idiv" o
@@ -168,49 +172,56 @@ hash = foldl' (\h c -> 33 * h `B.xor` fromIntegral (fromEnum c)) 5381
 func :: String -> FuncDefn -> [CDecl]
 func fname (FuncDefn args _ expr) = flip evalState initState $ do
   loads <- zipWithM newVar args' (map Reg funcRegs)
-  (decls, instrs) <- ff fname expr' 
-  instrs' <- tailCall instrs
-  return (Label fname (loads ++ instrs') : decls)
+  (decls, instrs) <- ff True fname expr' 
+  return (Label fname (loads ++ instrs) : decls)
   where
   tailCall instrs = do
     cleanup <- mkCleanup
     return (instrs ++ cleanup ++ [Ret])
-  ff lbl e = case e of
-    CInt i -> return ([], callFunc "mkint" [Imm i] (const []))
+  ret tailc r@(lbls, instrs) = if tailc 
+    then do cleanup <- mkCleanup; return (lbls, instrs ++ cleanup ++ [Ret]) 
+    else return r
+  ff tailc lbl e = case e of
+    CInt i -> ret tailc ([], (callFunc "mkint" [Imm i] (const [])))
     CStr lab str -> let lbl' = lbl ++ lab in
-      return ([Label lbl' [Ascii (str ++ "\\0")]]
+      ret tailc ([Label lbl' [Ascii (str ++ "\\0")]]
       , [mov (Global lbl') (Reg RAX)])
     CVar v -> do
       oper <- getVar v
-      return ([], [mov oper (Reg RAX)])
-    CLet v (CVar v1) e -> dupVar v v1 >> ff lbl e
+      ret tailc ([], [mov oper (Reg RAX)])
+    CLet v (CVar v1) e -> dupVar v v1 >> ff tailc lbl e
     CLet v e1 e2 -> do
-      (decls, instrs) <- ff (lbl ++ ".l") e1
+      (decls, instrs) <- ff False (lbl ++ ".l") e1
       load <- newVar v (Reg RAX)
-      (decls2, instrs2) <- ff (lbl ++ ".L") e2
+      (decls2, instrs2) <- ff tailc (lbl ++ ".L") e2
       return (decls ++ decls2, instrs ++ [load] ++ instrs2)
     CAp f xs -> do
       moper <- mGetVar f
-      let callOps = case moper of 
-            Nothing -> [Call (toSymbolName f)]
-            Just oper -> [movq oper (Reg R12), CallR R12]
-      d <- funcCall callOps xs (const (return []))
-      return ([], d)
+      let (fcall, tailfcall) = case moper of 
+            Nothing -> ([Call (toSymbolName f)], [Jump "jmp" (toSymbolName f)])
+            Just oper -> ([movq oper (Reg R12), CallR R12],
+                          [movq oper (Reg R12), JumpR "jmp" R12])
+      argOpers <- mapM getVar xs
+      let loadArgs = zipWith mov argOpers (map Reg funcRegs)
+      if tailc
+        then do
+          cleanup <- mkCleanup
+          return ([], loadArgs ++ cleanup ++ tailfcall)
+        else return ([], loadArgs ++ fcall)
     CCase v prods -> do
       oper <- getVar v
-      (decls, instrs) <- unzip <$> mapM (mkCase lbl) prods
+      (decls, instrs) <- unzip <$> mapM (mkCase tailc lbl) prods
       return (errorMsg : concat decls, 
         [ mov oper (Reg RAX) ] ++ concat instrs ++ 
         callFunc "error" [Global errorLbl] (const [])
         )
   
-  mkCase lbl (Production (Pattern constr vars) expr) = do
+  mkCase tailc lbl (Production (Pattern constr vars) expr) = do
     state <- get
     loads <- zipWithM f [1..] vars
-    (decls, instrs) <- ff lbl' expr
-    instrs' <- tailCall (loads ++ instrs)
+    (decls, instrs) <- ff tailc lbl' expr
     put state
-    return ( Label lbl' instrs' : decls ,
+    return ( Label lbl' (loads ++ instrs) : decls ,
       [ BinOp "cmpl" (Imm (hash constr)) (Mem 0 RAX)
       , Jump "je" lbl' ] )
     where
@@ -230,7 +241,7 @@ intOp op = mkFunc $ \(x:y:_) ->
   ] ++ callFunc "mkint" [Reg RDI] (const [])
 
 cmpOp :: String -> [Instr]
-cmpOp trueCond = mkFunc $ \(x:y:_) ->
+cmpOp trueCond = ($ funcRegs) $ \(x:y:_) ->
     [ mov (Mem 0 x) (Reg x)
     , cmp (Mem 0 y) (Reg x)
     , Jump trueCond "True"
@@ -309,12 +320,6 @@ callFunc fname opers andThen = catMaybes (zipWith maybeMov opers funcRegs)
   maybeMov (Reg r) r' | r == r' = Nothing
   maybeMov o r = Just (mov o (Reg r))
 
-funcCall :: [Instr] -> [String] -> (Register -> Compile [Instr])
-  -> Compile [Instr]
-funcCall callOps args andThen = do
-  opers <- mapM getVar args
-  ((zipWith mov opers (map Reg funcRegs) ++ callOps) ++) <$> andThen RAX
-
 printf :: [Instr]
 printf = [ clear (Reg RAX), Call "printf" ]
 
@@ -323,8 +328,7 @@ outint =
   [ Label "out_int" $ mkFunc $ \(x:_) ->
     [ mov (Mem 0 x) (Reg RSI)
     , mov (Global "int.Format") (Reg RDI) ]
-    ++ printf ++
-    [ Ret ]
+    ++ printf
   , Label "int.Format"
     [ Asciz "%ld" ]
   ]

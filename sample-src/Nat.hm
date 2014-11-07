@@ -21,6 +21,11 @@ toInt(n) = case n
   | S(n') => toInt(n') + 1
   };
 
+fromInt(n) = case n <= 0
+  { True() => Z()
+  | False() => S(fromInt(n - 1))
+  };
+
 eqNat(m, n) = case m
   { Z() => case n
     { Z() => True()
