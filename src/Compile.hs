@@ -16,8 +16,6 @@ import Data.Maybe (catMaybes)
 import qualified Data.Set as S
 import Data.Set (Set)
 
-import Debug.Trace
-
 data CExpr v = CInt Int32
   | CStr String String
   | CVar v
@@ -75,7 +73,7 @@ data Instr =
   | Jump String String
   | Syscall
   | Push Oper
-  | Pop Oper --Register
+  | Pop Oper
   | Ret
   | Idiv Oper
 
@@ -173,11 +171,10 @@ constructor name arity = Label name $ mkFunc $ \xs ->
   )
 
 hash :: String -> Int32
-hash = foldl' (\h c -> 33*h `B.xor` fromIntegral (fromEnum c)) 5381
+hash = foldl' (\h c -> 33 * h `B.xor` fromIntegral (fromEnum c)) 5381
 
 func :: String -> FuncDefn -> [CDecl]
 func fname (FuncDefn args _ expr) = flip evalState initState $ do
-  --traceShow expr' True `seq` return ()
   loads <- zipWithM newVar args' (map Reg funcRegs)
   (decls, instrs) <- ff fname expr' 
   instrs' <- tailCall instrs

@@ -252,17 +252,20 @@ instantiate flex mapf (Q vars expr) = do
 instantiateE :: Quantified TyExpr -> TypeCheck TyExpr
 instantiateE = instantiate Flex id
 
--- | State when performing Hindley-Milner type inference. The 'Int' is
--- a counter intended to easily provide fresh variables. The 'Subst' is
+-- | State when performing Hindley-Milner type inference. The 'Set String' 
+-- holds already-used variables so we don't repeat.  The 'Subst' is
 -- a map of type variables to type expressions which must hold.
-data TIState = TIState Int Subst deriving Show
+data TIState = TIState (Set String) Subst deriving Show
 
 -- Create a new type variable
 newTyVar :: String -> Flex -> TypeCheck TyExpr
 newTyVar str flex = do
-  (TIState i s) <- lift get
-  lift $ put (TIState (i + 1) s)
-  return (TyVar (TV flex (str ++ show i)))
+  (TIState used s) <- lift get
+  let (name : _) = [ n | ext <- "" : map show [ 1 :: Int .. ]
+                       , let n = str1 ++ ext, not (S.member n used) ]
+  lift (put (TIState (S.insert name used) s))
+  return (TyVar (TV flex name))
+  where str1 = str
 
 -- | The computational context for performing Hindley-Milner
 -- type inference. We can throw an error or we can access some state.
@@ -428,13 +431,10 @@ tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
   doKindCheck failCtxt ty = case kindCheck (tycons ctxt) ty of
     Left e -> (appFail fail failCtxt) e
     Right () -> return ()
-  fail s = throwE ("In function declaration '" ++ fname ++
-    "', " ++ s)
+  fail s = throwE ("In function declaration '" ++ fname ++ "', " ++ s)
   mapf f (args, retTy, exp) = (map (second f) args, f retTy
                               , modifyTypesE f exp)
-  newArg (TypedIdent (NTerm x) _) = do
-    var <- newTyVar "a" Flex
-    return (x, var)
+  newArg (TypedIdent (NTerm x) _) = (,) x <$> newTyVar "a" Flex
   updateCtxt :: [(String, TyExpr)] -> TyExpr -> Context
   updateCtxt vs retTy = 
     ctxt { terms = M.insert fname fdef (addTerms (terms ctxt)) }
@@ -457,7 +457,7 @@ modifyTypesE f = g where
 runTypeCheck :: TypeCheck a -> (Either String a, TIState)
 runTypeCheck t = runState (runExceptT t) initTIState
   where 
-  initTIState = TIState 0 M.empty
+  initTIState = TIState S.empty M.empty
 
 -- | Substitute a type variable name with a given expression
 -- in a type expression.
