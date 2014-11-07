@@ -12,7 +12,7 @@ import Data.List (intercalate, foldl')
 
 import qualified Data.Map as M
 import Data.Map (Map)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Set as S
 import Data.Set (Set)
 
@@ -26,16 +26,17 @@ data CExpr v = CInt Int32
 
 varsInExp :: Expr -> Set String
 varsInExp e = case e of
-  ELet (TypedIdent (NTerm v) _) e1 e2 -> 
+  ELet (TypedIdent v _) e1 e2 -> 
     S.insert v (varsInExp e1 `S.union` varsInExp e2)
   ECase e prods -> varsInExp e `S.union` S.fromList
-    [ t | Production (Pattern _ terms) _ <- prods, NTerm t <- terms ]
+    [ t | Production (Pattern _ terms) _ <- prods, t <- terms ]
   EAp _ _ es -> S.unions (map varsInExp es)
   Typed e _ -> varsInExp e
   _ -> S.empty
 
 toCExpr :: Set String -> Expr -> CExpr String
-toCExpr usedVars e = flip evalState (0, usedVars `S.union` varsInExp e) (f e ) where
+toCExpr usedVars e = evalState (f e) (0, usedVars `S.union` varsInExp e) 
+  where
   f e = case e of
     EInt i -> return $ CInt i
     EStr s -> do
@@ -45,26 +46,26 @@ toCExpr usedVars e = flip evalState (0, usedVars `S.union` varsInExp e) (f e ) w
       return $ CStr ("str" ++ show i') s
     EVar v -> return $ CVar v
     EAp _ f es -> do
-      (vs, lets) <- fmap unzip $ zipWithM funcArgs [1..] es
-      return $ (foldr (.) id lets) (CAp f vs)
+      (vs, lets) <- unzip <$> zipWithM funcArgs [1..] es
+      return $ foldr (.) id lets (CAp f vs)
     ECase e prods -> do
       v <- newV "scrut"
       e' <- f e
       prods' <- mapM doProd prods
       return $ CLet v e' (CCase v prods')
-    ELet (TypedIdent (NTerm v) _) e1 e2 ->
+    ELet (TypedIdent v _) e1 e2 ->
       CLet v <$> f e1 <*> f e2
     Typed e _ -> f e
   funcArgs i assn = do
     v <- newV ("arg" ++ show i)
     assn' <- f assn
-    return $ (v, CLet v assn')
+    return (v, CLet v assn')
   doProd (Production p e) = fmap (Production p) (f e)
   newV str = do
     (i, vs) <- get
-    if S.member str vs then newV (str ++ "'") else do
-      put (i, S.insert str vs)
-      return str
+    let str' : _ = [ n | n <- map (str ++) ( "" : map show [ 0 :: Int .. ] )
+                       , not (S.member n vs) ]
+    put (i, S.insert str' vs) >> return str'
 
 data Instr = 
     BinOp String Oper Oper
@@ -81,28 +82,20 @@ data Instr =
   | Asciz String
   deriving (Eq, Show)
 
-mov, movl, xor :: Oper -> Oper -> Instr
 mov = BinOp "mov"
-cmpl = BinOp "cmpl"
 cmp = BinOp "cmp"
-movl = BinOp "movl"
 movq = BinOp "movq"
-xor = BinOp "xor"
+clear oper = BinOp "xor" oper oper
 add = BinOp "add"
-sub = BinOp "sub"
 imul = BinOp "imul"
 
-je = Jump "je"
-
-data CDecl = Label String [Instr]
-  deriving (Eq, Show)
+data CDecl = Label String [Instr] deriving (Eq, Show)
 
 data Register = 
     RAX | RCX | RDX
   | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
   | RDI | RSI
   | RSP
-  | EDI
   deriving (Eq, Enum)
 
 instance Show Register where
@@ -121,7 +114,6 @@ instance Show Register where
     RDI -> "rdi"
     RSI -> "rsi"
     RSP -> "rsp"
-    EDI -> "edi"
 
 data Oper = Global String
   | Imm Int32 | Reg Register | Mem Int Register 
@@ -184,7 +176,7 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
     cleanup <- mkCleanup
     return (instrs ++ cleanup ++ [Ret])
   ff lbl e = case e of
-    CInt i -> return $ ([], callFunc "mkint" [Imm i] (\_ -> []))
+    CInt i -> return ([], callFunc "mkint" [Imm i] (const []))
     CStr lab str -> let lbl' = lbl ++ lab in
       return ([Label lbl' [Ascii (str ++ "\\0")]]
       , [mov (Global lbl') (Reg RAX)])
@@ -202,40 +194,40 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
       let callOps = case moper of 
             Nothing -> [Call (toSymbolName f)]
             Just oper -> [movq oper (Reg R12), CallR R12]
-      d <- funcCall callOps xs (\_ -> return [])
+      d <- funcCall callOps xs (const (return []))
       return ([], d)
     CCase v prods -> do
       oper <- getVar v
-      (decls, instrs) <- fmap unzip $ mapM (mkCase lbl) prods
+      (decls, instrs) <- unzip <$> mapM (mkCase lbl) prods
       return (errorMsg : concat decls, 
         [ mov oper (Reg RAX) ] ++ concat instrs ++ 
-        callFunc "error" [Global errorLbl] (\_ -> [])
+        callFunc "error" [Global errorLbl] (const [])
         )
   
-  mkCase lbl (Production (Pattern (NDataCon constr) vars) expr) = do
+  mkCase lbl (Production (Pattern constr vars) expr) = do
     state <- get
     loads <- zipWithM f [1..] vars
     (decls, instrs) <- ff lbl' expr
     instrs' <- tailCall (loads ++ instrs)
     put state
     return ( Label lbl' instrs' : decls ,
-      [ cmpl (Imm (hash constr)) (Mem 0 RAX)
-      , je lbl' ] )
+      [ BinOp "cmpl" (Imm (hash constr)) (Mem 0 RAX)
+      , Jump "je" lbl' ] )
     where
     lbl' = lbl ++ "." ++ constr
-    f i (NTerm v) = newVar v (Mem (8 * i) RAX)
+    f i v = newVar v (Mem (8 * i) RAX)
 
   errorLbl = fname ++ ".err"
   errorMsg = Label errorLbl [ Ascii ("Pattern matching failure in function '"
     ++ fname ++ "'.\\0") ]
-  args' = [ n | TypedIdent (NTerm n) _ <- args ]
+  args' = [ n | TypedIdent n _ <- args ]
   expr' = toCExpr (S.fromList args') expr
 
 intOp :: (Oper -> Oper -> Instr) -> [Instr]
 intOp op = mkFunc $ \(x:y:_) ->
   [ mov (Mem 0 x) (Reg RDI)
   , op (Mem 0 y) (Reg RDI)
-  ] ++ callFunc "mkint" [Reg RDI] (\_ -> [])
+  ] ++ callFunc "mkint" [Reg RDI] (const [])
 
 cmpOp :: String -> [Instr]
 cmpOp trueCond = mkFunc $ \(x:y:_) ->
@@ -247,7 +239,7 @@ cmpOp trueCond = mkFunc $ \(x:y:_) ->
 
 intOps :: [CDecl]
 intOps = [ Label (toSymbolName x) (intOp y)
-  | (x, y) <- [ ("plus", add), ("minus", sub), ("times", imul) ]
+  | (x, y) <- [ ("plus", add), ("minus", BinOp "sub"), ("times", imul) ]
   ]
 
 cmpOps :: [CDecl]
@@ -258,49 +250,40 @@ cmpOps = [ Label (toSymbolName (x ++ "Int")) (cmpOp y)
 
 divOp :: CDecl
 divOp = Label (toSymbolName "div") $ mkFunc $ \(x:y:_) ->
-  [ xor (Reg RDX) (Reg RDX)
+  [ clear (Reg RDX)
   , mov (Mem 0 x) (Reg RAX)
   , mov (Mem 0 y) (Reg RSI)
   , Idiv (Reg RSI) ]
-  ++ callFunc "mkint" [Reg RAX] (\_ -> [])
+  ++ callFunc "mkint" [Reg RAX] (const [])
 
 data CompileState = CompileState
   { vars :: !(Map String Oper)
   , stackSize :: !Int
-  , freeRegs :: [Register]
   }
 
 mkCleanup :: Compile [Instr]
 mkCleanup = do
   i <- gets stackSize
-  return $ if i > 0
-    then [add (Imm (8 * fromIntegral i)) (Reg RSP)]
-    else []
+  return [ add (Imm (8 * fromIntegral i)) (Reg RSP) | i > 0 ]
 
 initState :: CompileState
-initState = CompileState M.empty 0 [] --tempRegs
+initState = CompileState M.empty 0
 
 dupVar :: String -> String -> Compile ()
 dupVar new old = do
-  CompileState vars stacksize freeRegs <- get
+  CompileState vars stacksize <- get
   oper <- getVar old
-  put (CompileState (M.insert new oper vars) stacksize freeRegs)
+  put (CompileState (M.insert new oper vars) stacksize)
   
   
 
 newVar :: String -> Oper -> Compile Instr
 newVar n oldOper = do
-  CompileState vars stackSize freeRegs <- get
-  case freeRegs of
-    (r : regs) -> do
-      let oper = Reg r
-      put (CompileState (M.insert n oper vars) stackSize regs)
-      return (mov oldOper oper)
-    [] -> do
-      let stackSize' = stackSize + 1
-      let oper = Mem 0 RSP
-      put (CompileState (M.insert n oper (M.map f vars)) stackSize' freeRegs)
-      return (Push oldOper)
+  CompileState vars stackSize <- get
+  let stackSize' = stackSize + 1
+  let oper = Mem 0 RSP
+  put (CompileState (M.insert n oper (M.map f vars)) stackSize')
+  return (Push oldOper)
   where
   f (Mem i RSP) = Mem (8 + i) RSP
   f x = x
@@ -309,19 +292,12 @@ mGetVar :: String -> Compile (Maybe Oper)
 mGetVar n = fmap (M.lookup n . vars) get
 
 getVar :: String -> Compile Oper
-getVar n = do
-  mx <- mGetVar n
-  return $ case mx of
-    Just o -> o
-    Nothing -> Global n
+getVar n = fromMaybe (Global n) <$> mGetVar n
 
 type Compile = State CompileState
 
 funcRegs :: [Register]
 funcRegs = [RDI, RSI, RDX, RCX, R8, R9]
-
-tempRegs :: [Register]
-tempRegs = [R12, R13, R14, R15]
 
 mkFunc :: ([Register] -> [Instr]) -> [Instr]
 mkFunc f = f funcRegs ++ [Ret]
@@ -339,40 +315,31 @@ funcCall callOps args andThen = do
   opers <- mapM getVar args
   ((zipWith mov opers (map Reg funcRegs) ++ callOps) ++) <$> andThen RAX
 
+printf :: [Instr]
+printf = [ clear (Reg RAX), Call "printf" ]
+
 outint :: [CDecl]
 outint = 
   [ Label "out_int" $ mkFunc $ \(x:_) ->
     [ mov (Mem 0 x) (Reg RSI)
-    , mov (Global "intFormat") (Reg RDI)
-    , xor (Reg RAX) (Reg RAX)
-    , Call "printf"
-    , Ret
-    ]
-  , Label "intFormat"
+    , mov (Global "int.Format") (Reg RDI) ]
+    ++ printf ++
+    [ Ret ]
+  , Label "int.Format"
     [ Asciz "%ld" ]
   ]
 
 outstring :: CDecl
-outstring = Label "out_string"
-  [ xor (Reg RAX) (Reg RAX)
-  , Call "printf"
-  , Ret
-  ]
+outstring = Label "out_string" (printf ++ [Ret])
 
 arrayOps :: [CDecl]
 arrayOps =
   [ Label "set" $ ($ funcRegs) $ \(arr : pos : val : _) -> 
-    [ mov (Mem 0 pos) (Reg R12)
-    , imul (Imm 8) (Reg R12)
-    , add (Reg R12) (Reg arr)
-    , mov (Reg val) (Mem 0 arr)
+    offset pos arr ++
+    [ mov (Reg val) (Mem 0 arr)
     , Jump "jmp" "Unit" ]
   , Label "get" $ mkFunc $ \(arr : pos : _) ->
-    [ mov (Mem 0 pos) (Reg R12)
-    , imul (Imm 8) (Reg R12)
-    , add (Reg R12) (Reg arr)
-    , mov (Mem 0 arr) (Reg RAX)
-    ]
+    offset pos arr ++ [ mov (Mem 0 arr) (Reg RAX) ]
   , Label "makeArray" $ mkFunc $ \(size : defVal : _) -> 
     [ Push (Reg size)
     , Push (Reg defVal)
@@ -382,58 +349,35 @@ arrayOps =
        callFunc "setAll" [Reg arr, Reg R12, Reg R13] (\_ -> 
          [Pop (Reg RAX)]))
   ]
+  where
+  offset pos arr = 
+    [ mov (Mem 0 pos) (Reg R12)
+    , imul (Imm 8) (Reg R12)
+    , add (Reg R12) (Reg arr) ]
 
     
 
 errorDecls :: [CDecl]
-errorDecls = [ Label "error"
-  [ xor (Reg RAX) (Reg RAX)
-  , mov (Reg RDI) (Reg RSI)
+errorDecls = [ Label "error" $
+  [ mov (Reg RDI) (Reg RSI)
   , mov (Global "error.msg") (Reg RDI)
-  , Call "printf"
-  , mov (Imm 60) (Reg RAX)
-  , xor (Reg RDI) (Reg RDI)
+  ] ++ printf ++ 
+  [ mov (Imm 60) (Reg RAX)
+  , clear (Reg RDI)
   , Syscall
   ]
   , Label "error.msg" [ Asciz "Error: %s\\n" ]
   ]
 
 primOps :: [CDecl]
-primOps = mkint : outstring : divOp : outint ++ intOps ++ cmpOps ++ arrayOps
-  ++ errorDecls
-
-prims :: IO ()
-prims = mapM_ (putStrLn . printCDecl) 
-  (
-  constructor "Cons" 2 : constructor "True" 0 : constructor "False" 0 
-  : constructor "Unit" 0 
-  : primOps
-  ++ 
-  func "main" (FuncDefn [] Nothing 
-    (ECase (EAp Func "_<" [EInt 0, EInt 1]) 
-    [ Production (Pattern (NDataCon "True") []) 
-      ( EAp Func "out_string" [EStr "blahblah\\n" ] )
-    , Production (Pattern (NDataCon "False") [])
-      (
-    (EAp Func "seq" 
-      [ EAp Func "out_int" [EAp Func "_+" [EInt 1, EInt 2]]
-      , EAp Func "out_string" [EStr "Hello, world!\\n"] 
-      ] 
-    )
-    )
-    ]
-    )
-  )
-  ++ func "seq" (FuncDefn 
-    [TypedIdent (NTerm "x") Nothing
-    , TypedIdent (NTerm "y") Nothing] Nothing (EVar "y"))
-  )
+primOps = mkint : outstring : divOp : outint ++ intOps 
+  ++ cmpOps ++ arrayOps ++ errorDecls
 
 compileDecl :: Decl -> [CDecl]
 compileDecl d = case d of
   DataDecl _ (DataDefn _ alts) ->
-    [ constructor name (length args) | DataAlt (NDataCon name) args <- alts ]
-  FuncDecl (NTerm fname) funcDefn -> func fname funcDefn
+    [ constructor name (length args) | DataAlt name args <- alts ]
+  FuncDecl fname funcDefn -> func fname funcDefn
 
 toSymbolName :: String -> String
 toSymbolName = concatMap f where

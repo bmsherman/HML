@@ -20,60 +20,61 @@ pprintV :: Value -> String
 pprintV x = case x of
   VInt i -> show i
   VStr s -> show s
-  VConstrAp dcon vals -> dcon ++ "(" ++ intercalate ", " (map pprintV vals) ++ ")"
+  VConstrAp dcon vals -> 
+    dcon ++ "(" ++ intercalate ", " (map pprintV vals) ++ ")"
 
 
-data Evaluator eval value = Evaluator 
-  { primOps :: Map NTerm (eval [value] value)
-  , compile :: FuncDefn -> (eval [value] value)
+data Evaluator = Evaluator 
+  { primOps :: Map NTerm EvalInterp
+  , compile :: FuncDefn -> EvalInterp
   }
 
-newtype EvalInterp a b = EvalInterp 
-  (Map String (EvalInterp [Value] Value) -> a -> Either String b)
+newtype EvalInterp = EvalInterp 
+  (Map String EvalInterp -> [Value] -> Either String Value)
 
-interpreter :: Evaluator EvalInterp Value
+interpreter :: Evaluator
 interpreter = Evaluator 
   (M.fromList ops)
   (EvalInterp . funEval)
   where
-  binOp :: (Int32 -> Int32 -> Int32) -> EvalInterp [Value] Value
+  binOp :: (Int32 -> Int32 -> Int32) -> EvalInterp
   binOp f = EvalInterp $ \_ xs -> case xs of 
       [VInt i, VInt j] -> Right (VInt (f i j))
       _ -> Left "binary operation error"
-  binCmp :: (Int32 -> Int32 -> Bool) -> EvalInterp [Value] Value
+  binCmp :: (Int32 -> Int32 -> Bool) -> EvalInterp
   binCmp f = EvalInterp $ \_ xs -> case xs of 
       [VInt i, VInt j] -> Right (bool (f i j))
       _ -> Left "binary comparison error"
-  neg :: EvalInterp [Value] Value
+  neg :: EvalInterp
   neg = EvalInterp $ \_ x -> case x of
     [VInt i] -> Right (VInt (- i))
     _ -> Left "negation error"
   ops =
-    [ (NTerm "+", binOp (+))
-    , (NTerm "*", binOp (*))
-    , (NTerm "/", binOp div)
-    , (NTerm "-", binOp (-))
-    , (NTerm "<", binCmp (<))
-    , (NTerm "<=", binCmp (<=))
-    , (NTerm "==", binCmp (==))
-    , (NTerm "negate", neg)
+    [ ("plus", binOp (+))
+    , ("times", binOp (*))
+    , ("div", binOp div)
+    , ("minus", binOp (-))
+    , ("ltInt", binCmp (<))
+    , ("lteInt", binCmp (<=))
+    , ("eqInt", binCmp (==))
+    , ("gteInt", binCmp (>=))
+    , ("gtInt", binCmp (>))
+    , ("negate", neg)
     ]
 
-data EvalContext to value = Ctxt
-  { vars  :: Map NTerm value
-  , funcs :: Map String (to [value] value)
+data EvalContext = Ctxt
+  { vars  :: Map NTerm Value
+  , funcs :: Map String EvalInterp
   }
 
-type InterpContext = EvalContext EvalInterp Value
-
-insertVar :: NTerm -> value -> EvalContext to value -> EvalContext to value
+insertVar :: NTerm -> Value -> EvalContext -> EvalContext 
 insertVar name val (Ctxt vars funcs) = Ctxt (M.insert name val vars) funcs
 
-eval :: InterpContext -> Expr -> Either String Value
+eval :: EvalContext -> Expr -> Either String Value
 eval ctxt e = case e of
   EInt i -> return (VInt i)
   EStr s -> return (VStr s)
-  EVar vname -> case M.lookup (NTerm vname) (vars ctxt) of
+  EVar vname -> case M.lookup vname (vars ctxt) of
     Nothing -> Left ("Variable " ++ show vname ++ "not in scope")
     Just v -> return v
   EAp DataCon dcon exprs -> 
@@ -97,7 +98,7 @@ eval ctxt e = case e of
 bool :: Bool -> Value
 bool b = VConstrAp (show b) []
 
-funEval :: FuncDefn -> Map String (EvalInterp [Value] Value)
+funEval :: FuncDefn -> Map String EvalInterp
   -> [Value] -> Either String Value
 funEval f@(FuncDefn args _ body) gctxt vals = eval ctxt body
   where
@@ -105,11 +106,11 @@ funEval f@(FuncDefn args _ body) gctxt vals = eval ctxt body
   f (TypedIdent term _) v = (term, v)
   ctxt = Ctxt lctxt gctxt
 
-caseEval :: InterpContext -> Value -> [Production Expr] 
+caseEval :: EvalContext -> Value -> [Production Expr] 
   -> Either String Value
 caseEval ctxt (VConstrAp _ _) [] = Left "No cases match"
 caseEval ctxt@(Ctxt lctxt gctxt) val@(VConstrAp dcon vals) 
-  (Production (Pattern (NDataCon pdcon) binders) body : prods) = 
+  (Production (Pattern pdcon binders) body : prods) = 
     if dcon == pdcon
       then let newvars = M.fromList (zip binders vals) in
 	let lctxt' = M.union newvars lctxt in

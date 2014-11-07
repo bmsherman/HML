@@ -23,13 +23,13 @@ tokens :-
   $digit+                               { lex (Int . read) }
   "="                                   { lexc Equals }
   "->"                                  { lexc FuncArr }
-  "+" | "-" | "*" | "/" | "~"           { lex FuncT }
-  "==" | "<=" | "<" | ">" | ">="        { lex FuncT }
-  ">>"                                  { lex FuncT }
-  : | ";" | "," | "|" | "=>"            { lex Ctrl }
-  [\( \) \{ \}] | "[" | "]"             { lex Delim }
+  "+" | "-" | "*" | "/" | "~"           { lex Tok }
+  "==" | "<=" | "<" | ">" | ">="        { lex Tok }
+  ">>"                                  { lex Tok }
+  : | ";" | "," | "|" | "=>"            { lex Tok }
+  [\( \) \{ \}] | "[" | "]"             { lex Tok }
+  "data" | "case" | "of" | "let" | "in" { lex Tok }
   \" ([^\"])* \"                        { lex (String . init . tail) }
-  "data" | "case" | "of" | "let" | "in" { lex Keyword }
   $lower [$alpha $digit \_ \']*         { lex LName }
   $upper [$alpha $digit \_ \']*         { lex UName }
 
@@ -40,10 +40,7 @@ data Token =
   | String String
   | LName String
   | UName String
-  | Delim String
-  | Ctrl String
-  | Keyword String
-  | FuncT String
+  | Tok String
   | Equals
   | FuncArr
   | TokenEOF
@@ -54,13 +51,10 @@ instance Show Token where
     String s -> show s
     LName s -> s
     UName s -> s
-    Delim s -> s
-    Ctrl s -> s
-    Keyword s -> s
+    Tok s -> s
     Equals -> "="
     FuncArr -> "->"
     TokenEOF -> "EOF"
-    FuncT s -> s
 
 alexEOF = return TokenEOF
 

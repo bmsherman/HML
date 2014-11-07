@@ -4,13 +4,13 @@ import Data.Int (Int32)
 import Data.List (intercalate)
 
 -- | names of terms
-newtype NTerm = NTerm String deriving (Eq, Show, Ord)
+type NTerm = String 
 
 -- | names of type constructors
-newtype NTyCon = NTyCon String deriving (Eq, Show, Ord)
+type NTyCon = String 
 
 -- | names of data constructors
-newtype NDataCon = NDataCon String deriving (Eq, Show, Ord)
+type NDataCon = String
 
 -- | Term-level expressions
 data Expr = EInt Int32            -- ^ constant integer
@@ -49,7 +49,7 @@ pprintTyExpr x = case x of
   StrTy -> "String"
   TyVar (TV _ s) -> s
   TArr argTys retTy -> pList argTys ++ " -> " ++ pprintTyExpr retTy
-  TAp (NTyCon tycon) exprs -> tycon ++ pList exprs
+  TAp tycon exprs -> tycon ++ pList exprs
   where
   pList xs = "(" ++ intercalate ", " (map pprintTyExpr xs) ++ ")"
 

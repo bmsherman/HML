@@ -19,16 +19,15 @@ import qualified Data.Set as S
 
 -- | elaborate data declaration (part 1)
 elabDataDef :: NTyCon -> DataDefn -> Either [String] DataDef
-elabDataDef (NTyCon tyName) (DataDefn vars dataAlts) = 
+elabDataDef tyName (DataDefn vars dataAlts) = 
   case [ "in data constructor "
          ++ dN ++ ", type variable '" ++ tyVar ++ "' not in scope."
-       | DataAlt (NDataCon dN) exprs <- dataAlts, e <- exprs
+       | DataAlt dN exprs <- dataAlts, e <- exprs
        , tyVar <- S.toList (freeVarsQ (Q varSet e)) ] of
-    [] -> Right (DataDef tyName vars' dataAlts)
+    [] -> Right (DataDef tyName vars dataAlts)
     errs -> Left errs
   where
-  vars' = map (\(NTerm n) -> n) vars
-  varSet = S.fromList vars'
+  varSet = S.fromList vars
 
 data DataDef = DataDef String [String] [DataAlt] deriving Show
 
@@ -38,7 +37,7 @@ dataDefCtxt :: Map String Arity -> DataDef
 dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
   mLefts  [ left (("in data constructor '" ++ dcon ++ "', ") ++) 
              $ kindCheck tycs' e
-             | DataAlt (NDataCon dcon) es <- dataAlts, e <- es ]
+             | DataAlt dcon es <- dataAlts, e <- es ]
   return (Context funcs (M.singleton tyName arity))
   where
   mLefts = go [] where
@@ -50,9 +49,9 @@ dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
   arity = S.size varSet
   varSet = S.fromList vars
   funcs = M.fromList [ (dcon, Q varSet (TArr x tyExpr))
-    | DataAlt (NDataCon dcon) x <- dataAlts ]
+    | DataAlt dcon x <- dataAlts ]
   varsE = map (TyVar . TV Flex) vars
-  tyExpr = TAp (NTyCon tyName) varsE
+  tyExpr = TAp tyName varsE
 
 type Arity = Int
 data Context  = Context
@@ -73,7 +72,7 @@ instance Show Context where
 -- (arities) are correct
 kindCheck :: Map String Arity -> TyExpr -> Either String ()
 kindCheck tycs ty = case ty of
-  TAp (NTyCon tcon) es -> case M.lookup tcon tycs of
+  TAp tcon es -> case M.lookup tcon tycs of
     Nothing -> Left $ "type constructor '" ++ tcon ++ "' not in scope"
     Just arity -> let l = length es in if l == arity
       then zipWithM_ (\i -> left (("in argument " ++ show i ++ 
@@ -159,7 +158,7 @@ unify' fail ty1 ty2 = do
 -- | Apply all of the current substitutions to a type expression
 evalTy :: TyExpr -> TypeCheck TyExpr
 evalTy ty = do
-  (TIState _ subst) <- lift get
+  TIState _ subst <- lift get
   return (apply subst ty)
 
 plural :: Int -> String -> String
@@ -174,18 +173,18 @@ failSubTy fail ty1 ty2  = appFail fail ("can't match expected type "
 -- | Unify two type expressions
 unify :: FailCont
   -> TyExpr -> TyExpr -> TypeCheck TyExpr
-unify fail ty1@(TAp tcon1@(NTyCon n1) e1s) 
-           ty2@(TAp tcon2@(NTyCon n2) e2s) = if tcon1 == tcon2
+unify fail ty1@(TAp tcon1 e1s) 
+           ty2@(TAp tcon2 e2s) = if tcon1 == tcon2
   then do
     unifyOps <- case strictZipWith (unify fail') e1s e2s of
       Right uO -> return uO
-      Left (i, j) -> fail' $ "type constructor '" ++ n1 ++ "' expected "
+      Left (i, j) -> fail' $ "type constructor '" ++ tcon1 ++ "' expected "
         ++ show i ++ " " ++ plural i "type argument"
         ++ " but was given " ++ show j ++ "."
     argTys <- sequence unifyOps
     return (TAp tcon1 argTys)
-  else fail' ("expected type constructor " ++ n1 
-        ++ " but was given " ++ n2)
+  else fail' ("expected type constructor " ++ tcon1 
+        ++ " but was given " ++ tcon2)
   where fail' = failSubTy fail ty1 ty2
 unify fail (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
   then varBind fail t (TyVar u)
@@ -260,12 +259,17 @@ data TIState = TIState (Set String) Subst deriving Show
 -- Create a new type variable
 newTyVar :: String -> Flex -> TypeCheck TyExpr
 newTyVar str flex = do
-  (TIState used s) <- lift get
-  let (name : _) = [ n | ext <- "" : map show [ 1 :: Int .. ]
-                       , let n = str1 ++ ext, not (S.member n used) ]
+  TIState used s <- lift get
+  let name : _ = [ n | ext <- "" : map show [ 1 :: Int .. ]
+                       , let n = str ++ ext, not (S.member n used) ]
   lift (put (TIState (S.insert name used) s))
   return (TyVar (TV flex name))
-  where str1 = str
+
+addUsedTyVar :: String -> TypeCheck ()
+addUsedTyVar n = lift $ do
+  TIState used s <- get
+  put (TIState (S.insert n used) s)
+  
 
 -- | The computational context for performing Hindley-Milner
 -- type inference. We can throw an error or we can access some state.
@@ -278,9 +282,7 @@ ti fail ctxt e = case e of
   EStr _ -> return StrTy
   EVar vname -> case M.lookup vname (terms ctxt) of
     Nothing -> fail ("variable '" ++ vname ++ "' not in scope")
-    Just scheme -> do
-      ty <- instantiateE scheme
-      return ty
+    Just scheme -> instantiateE scheme
   EAp inj fname exprs -> case M.lookup fname (terms ctxt) of
     Nothing -> fail ("function '" ++ fname ++ "' not in scope")
     Just scheme -> do
@@ -290,7 +292,7 @@ ti fail ctxt e = case e of
       retTy <- newTyVar "b" Flex
       TArr argTys' retTy' <- unify fail expTyExpr (TArr argTys retTy)
       return retTy'
-  ELet (TypedIdent (NTerm name) mty) assn expr -> do
+  ELet (TypedIdent name mty) assn expr -> do
     assnTy <- ti (appFail fail ("in let-expression assignment for variable '"
          ++ name ++ "', ")) ctxt $ case mty of
            Nothing -> assn
@@ -301,13 +303,12 @@ ti fail ctxt e = case e of
     (inTys, outTys) <- unzip <$> sequence 
       [ tiCase (appFail fail ("in '" ++ dcon ++  
         "' branch of case expression, ")) ctxt ety d
-      | d@(Production (Pattern (NDataCon dcon) _) _) <- productions ]
+      | d@(Production (Pattern dcon _) _) <- productions ]
     outTy <- newTyVar "a" Flex
     _ <- foldM (unify' (appFail fail "in case expression, "))
           ety inTys
-    resultTy <- foldM (unify' (appFail fail "in case expression result, "))
-                outTy outTys 
-    return resultTy
+    foldM (unify' (appFail fail "in case expression result, "))
+          outTy outTys 
   Typed e ty -> do
     case kindCheck (tycons ctxt) ty of
       Left err -> fail err
@@ -324,7 +325,7 @@ ti fail ctxt e = case e of
 tiCase :: FailCont -> Context -> TyExpr -> Production Expr 
        -> TypeCheck (TyExpr, TyExpr)
 tiCase fail ctxt ety 
-  (Production (Pattern (NDataCon dcon) argNames) outExpr) = 
+  (Production (Pattern dcon argNames) outExpr) = 
     case M.lookup dcon (terms ctxt) of
       Nothing -> fail ("data constructor " ++ dcon ++
         " not in scope")
@@ -338,20 +339,19 @@ tiCase fail ctxt ety
             outTy <- ti fail (updateCtxt vs) outExpr
             return (retTy, outTy)
   where
-  zipper (NTerm x) y = (x, Q S.empty y)
+  zipper x y = (x, Q S.empty y)
   updateCtxt :: [(String, Quantified TyExpr)] -> Context
-  updateCtxt vs = 
-    ctxt { terms = (foldr (.) id (map (uncurry M.insert) vs)) (terms ctxt) }
+  updateCtxt vs = ctxt { terms = M.fromList vs `M.union` terms ctxt }
 
 -- | Typecheck / type-infer a function and produce a typing context
 -- to add to the current context.
 funcCtxt :: Context -> NTerm -> FuncDefn -> Either String Context
-funcCtxt ctxt fname@(NTerm fn) fdef = 
+funcCtxt ctxt fname fdef = 
   fmap f (elabFunction ctxt fname fdef)
   where
   toFunc (Q vs (args, ret)) = Q vs (TArr args ret)
   f :: Quantified ([TyExpr], TyExpr) -> Context
-  f ty = Context (M.singleton fn (toFunc ty)) M.empty
+  f ty = Context (M.singleton fname (toFunc ty)) M.empty
   elabFunction :: Context -> NTerm -> FuncDefn -> Either String 
     (Quantified ([TyExpr], TyExpr))
   elabFunction ctxt fname fdef = result
@@ -388,19 +388,20 @@ duplicated (x : xs) = (guard (x `elem` xs) >> return x) <|> duplicated xs
 createFuncTy :: FailCont -> FuncDefn
   -> TypeCheck (Quantified ([(String, TyExpr)], TyExpr, Expr))
 createFuncTy fail fdef@(FuncDefn args retTy e) = do
-  case duplicated [ n | TypedIdent (NTerm n) _ <- args ] of
+  case duplicated [ n | TypedIdent n _ <- args ] of
     Nothing -> return ()
     Just x -> fail $ "duplicate function argument '" ++ x ++ "'"
   vars <- case funcTyVars fdef of
     Left e -> fail e
     Right x -> return x
-  args' <- mapM (\(TypedIdent (NTerm n) ty) -> 
-    do { ty' <- mkTy ty; return (n, ty') }) args
-  retTy' <- mkTy retTy
+  mapM_ addUsedTyVar (S.toList vars)
+  args' <- zipWithM (\c (TypedIdent n ty) -> 
+    do { ty' <- mkTy [c] ty; return (n, ty') }) ['a'..] args
+  retTy' <- mkTy "z" retTy
   return (Q vars (args', retTy', e))
   where
-  mkTy Nothing = newTyVar "a" Flex
-  mkTy (Just e) = return e
+  mkTy name Nothing = newTyVar name Flex
+  mkTy _ (Just e) = return e
 
 -- | The set of free type variables in a term-level expression
 freeTyVars :: Expr -> Set String
@@ -416,7 +417,7 @@ freeTyVars express = case express of
 -- | Type inference for function types
 tiFunc :: Context -> NTerm -> FuncDefn
   -> TypeCheck (Quantified ([TyExpr], TyExpr))
-tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
+tiFunc ctxt fname fdef@(FuncDefn args _ expr) = do
   funcTy <- createFuncTy fail fdef
   (vs, expRetTy, e) <- instantiate Rigid mapf funcTy
   zipWithM_ (\i -> doKindCheck ("in argument " ++ show i ++ ", ") . snd) 
@@ -424,17 +425,17 @@ tiFunc ctxt (NTerm fname) fdef@(FuncDefn args _ expr) = do
   doKindCheck "in return type, " expRetTy
   actRetTy <- ti fail (updateCtxt vs expRetTy) expr
   retTy <- unify' fail expRetTy actRetTy
-  vs' <- mapM evalTy (map snd vs)
+  vs' <- mapM (evalTy . snd) vs
   let actFuncTy = generalize (vs', retTy)
   return actFuncTy
   where
   doKindCheck failCtxt ty = case kindCheck (tycons ctxt) ty of
-    Left e -> (appFail fail failCtxt) e
+    Left e -> appFail fail failCtxt e
     Right () -> return ()
   fail s = throwE ("In function declaration '" ++ fname ++ "', " ++ s)
   mapf f (args, retTy, exp) = (map (second f) args, f retTy
                               , modifyTypesE f exp)
-  newArg (TypedIdent (NTerm x) _) = (,) x <$> newTyVar "a" Flex
+  newArg (TypedIdent x _) = (,) x <$> newTyVar "a" Flex
   updateCtxt :: [(String, TyExpr)] -> TyExpr -> Context
   updateCtxt vs retTy = 
     ctxt { terms = M.insert fname fdef (addTerms (terms ctxt)) }

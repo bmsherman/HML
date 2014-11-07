@@ -21,33 +21,33 @@ import Typecheck
 %error { happyError }
 
 %token
-  '('              { Delim "(" }
-  ')'              { Delim ")" }
-  '{'              { Delim "{" }
-  '}'              { Delim "}" }
-  '['              { Delim "[" }
-  ']'              { Delim "]" }
-  ':'              { Ctrl ":" }
-  ','              { Ctrl "," }
-  ';'              { Ctrl ";" }
-  '+'              { FuncT "+" }
-  '-'              { FuncT "-" }
-  '*'              { FuncT "*" }
-  '/'              { FuncT "/"   }
-  intbincmp        { FuncT x | x `elem` ["<=", "==", "<", ">", ">="] }
-  '~'              { FuncT "~" }
-  '|'              { Ctrl "|" }
-  '=>'             { Ctrl "=>" }
-  '>>'             { FuncT ">>" }
+  '('              { Tok "(" }
+  ')'              { Tok ")" }
+  '{'              { Tok "{" }
+  '}'              { Tok "}" }
+  '['              { Tok "[" }
+  ']'              { Tok "]" }
+  ':'              { Tok ":" }
+  ','              { Tok "," }
+  ';'              { Tok ";" }
+  '+'              { Tok "+" }
+  '-'              { Tok "-" }
+  '*'              { Tok "*" }
+  '/'              { Tok "/"   }
+  intbincmp        { Tok x | x `elem` ["<=", "==", "<", ">", ">="] }
+  '~'              { Tok "~" }
+  '|'              { Tok "|" }
+  '=>'             { Tok "=>" }
+  '>>'             { Tok ">>" }
   int              { Int $$ }
   string           { String $$ }
   '='              { Equals  }
   '->'             { FuncArr }
-  data             { Keyword "data" }
-  case             { Keyword "case" }
-  of               { Keyword "of"   }
-  let              { Keyword "let"  }
-  in               { Keyword "in"   }
+  data             { Tok "data" }
+  case             { Tok "case" }
+  of               { Tok "of"   }
+  let              { Tok "let"  }
+  in               { Tok "in"   }
   intty            { UName x | x == "Int" }
   strty            { UName x | x == "String" }
   uname            { UName $$ }
@@ -72,9 +72,9 @@ DeclList :: { [Decl] }
 
 Decl :: { Decl }
   : data uname '(' IdentList ')' DataAltList 
-     { DataDecl (NTyCon $2) (DataDefn $4 $6) }
+     { DataDecl $2 (DataDefn $4 $6) }
   | lname '(' TypedIdentList ')' Typing '=' Expr
-     { FuncDecl (NTerm $1) (FuncDefn $3 $5 $7) }
+     { FuncDecl $1 (FuncDefn $3 $5 $7) }
 
 Expr :: { Expr }
   : int { EInt $1 }
@@ -108,7 +108,7 @@ TyExpr :: { TyExpr }
   : intty { IntTy }
   | strty { StrTy }
   | lname { TyVar (TV Flex $1) }
-  | uname '(' TyExprList ')' { TAp (NTyCon $1) $3 }
+  | uname '(' TyExprList ')' { TAp $1 $3 }
   | '(' TyExprList ')' '->' TyExpr { TArr $2 $5 }
 
 TyExprList :: { [TyExpr] }
@@ -123,15 +123,15 @@ Production :: { Production Expr }
   : Pattern '=>' Expr { Production $1 $3 }
 
 Pattern :: { Pattern }
-  : uname '(' IdentList ')' { Pattern (NDataCon $1) $3 }
+  : uname '(' IdentList ')' { Pattern $1 $3 }
 
 IdentList :: { [NTerm] }
   :   { [] }
   | IdentList1 { $1 }
 
 IdentList1 :: { [NTerm] }
-  : lname { [ NTerm $1 ] }
-  | lname ',' IdentList1 { (NTerm $1) : $3 }
+  : lname { [ $1 ] }
+  | lname ',' IdentList1 { $1 : $3 }
 
 TypedIdentList :: { [TypedIdent] }
   :   { [] }
@@ -150,7 +150,7 @@ ProdList1 :: { [Production Expr] }
   | Production '|' ProdList1 { $1 : $3 }
 
 DataAlt :: { DataAlt }
-  : uname '(' TyExprList ')' { DataAlt (NDataCon $1) $3 }
+  : uname '(' TyExprList ')' { DataAlt $1 $3 }
 
 DataAltList :: { [DataAlt] }
   :   { [] }
@@ -161,7 +161,7 @@ DataAltList1 :: { [DataAlt] }
   | DataAlt '|' DataAltList1 { $1 : $3 }
 
 TypedIdent :: { TypedIdent }
-  : lname Typing { TypedIdent (NTerm $1) $2 }
+  : lname Typing { TypedIdent $1 $2 }
 
 Typing :: { Maybe TyExpr }
   :   { Nothing }
@@ -173,13 +173,13 @@ processDecl :: Decl -> Alex Decl
 processDecl d = do
   (ctxt, errors) <- alexGetUserState
   let result = (unionC ctxt =<<) $ case d of
-	DataDecl tycon@(NTyCon tyN) datadef ->
-	  left (map (\x -> "In data declaration '" ++ tyN ++ "', " ++ x) ) $
+	DataDecl tycon datadef ->
+	  left (map (\x -> "In data declaration '" ++ tycon ++ "', " ++ x) ) $
             dataDefCtxt (tycons ctxt)
               =<< elabDataDef tycon datadef
-	FuncDecl n@(NTerm nt) funcDef ->
+	FuncDecl nt funcDef ->
 	  left (:[]) 
-	    $ funcCtxt ctxt n funcDef
+	    $ funcCtxt ctxt nt funcDef
   prefix <- prefixPos
   alexSetUserState $ case result of
     Left es -> (ctxt, [ prefix ++ ": " ++ x | x <- es ] ++ errors)
@@ -190,7 +190,7 @@ lexwrap :: (Token -> Alex a) -> Alex a
 lexwrap = (alexMonadScan >>=)
 
 cmpFunc :: Token -> String
-cmpFunc (FuncT x) = (++ "Int") $ case x of
+cmpFunc (Tok x) = (++ "Int") $ case x of
   "<" -> "lt"
   "<=" -> "lte"
   "==" -> "eq"

@@ -1,12 +1,10 @@
 module Test where
 
+import AST (Decl (FuncDecl))
+import Eval (Value, EvalInterp (..), Evaluator (..), interpreter)
 import Parse (parseDecls)
-
-import AST
-import Eval
-
-import Typecheck
-import Primitives
+import Primitives (preludeContext)
+import Typecheck (Context)
 
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -26,13 +24,11 @@ evalMain decls = mainFunc gctxt [] where
   gctxt = makeContext interpreter decls
   EvalInterp mainFunc = gctxt M.! "main"
 
-makeContext :: Evaluator EvalInterp Value -> [Decl]
-  -> Map String (EvalInterp [Value] Value)
+makeContext :: Evaluator -> [Decl] -> Map String EvalInterp
 makeContext (Evaluator primOps compile) = 
   M.union prims  . M.fromList . mapMaybe f
   where
-  --f :: Decl -> Maybe (NTerm, FuncDefn)
-  f (FuncDecl (NTerm name) defn) = Just (name, compile defn)
+  f (FuncDecl name defn) = Just (name, compile defn)
   f _ = Nothing
-  prims = M.mapKeys (\(NTerm x) -> ('_' : x)) primOps
+  prims = M.mapKeys ('_' :) primOps
 
