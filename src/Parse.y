@@ -174,7 +174,7 @@ processDecl d = do
   (ctxt, errors) <- alexGetUserState
   let result = (unionC ctxt =<<) $ case d of
 	DataDecl tycon datadef ->
-	  left (map (\x -> "In data declaration '" ++ tycon ++ "', " ++ x) ) $
+	  left (map (\x -> "In data declaration '" ++ tycon ++ "', \n  " ++ x) ) $
             dataDefCtxt (tycons ctxt)
               =<< elabDataDef tycon datadef
 	FuncDecl nt funcDef ->

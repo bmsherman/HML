@@ -21,7 +21,7 @@ import qualified Data.Set as S
 elabDataDef :: NTyCon -> DataDefn -> Either [String] DataDef
 elabDataDef tyName (DataDefn vars dataAlts) = 
   case [ "in data constructor "
-         ++ dN ++ ", type variable '" ++ tyVar ++ "' not in scope."
+         ++ dN ++ ",\n  type variable '" ++ tyVar ++ "' not in scope."
        | DataAlt dN exprs <- dataAlts, e <- exprs
        , tyVar <- S.toList (freeVarsQ (Q varSet e)) ] of
     [] -> Right (DataDef tyName vars dataAlts)
@@ -35,7 +35,7 @@ data DataDef = DataDef String [String] [DataAlt] deriving Show
 dataDefCtxt :: Map String Arity -> DataDef 
   -> Either [String] Context
 dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
-  mLefts  [ left (("in data constructor '" ++ dcon ++ "', ") ++) 
+  mLefts  [ left (("in data constructor '" ++ dcon ++ "', \n  ") ++) 
              $ kindCheck tycs' e
              | DataAlt dcon es <- dataAlts, e <- es ]
   return (Context funcs (M.singleton tyName arity))
@@ -76,7 +76,7 @@ kindCheck tycs ty = case ty of
     Nothing -> Left $ "type constructor '" ++ tcon ++ "' not in scope"
     Just arity -> let l = length es in if l == arity
       then zipWithM_ (\i -> left (("in argument " ++ show i ++ 
-           " of type constructor '" ++ tcon ++ "', ") ++) . kindCheck tycs) 
+           " of type constructor '" ++ tcon ++ "', \n  ") ++) . kindCheck tycs) 
            [1..] es
       else Left $ "type constructor '" ++ tcon ++ "' expects " ++ show arity
         ++ plural arity " argument" ++ " but received " ++ show l
@@ -125,7 +125,7 @@ type FailCont = forall a. String -> TypeCheck a
 
 -- | Add some description to the failure continuation
 appFail :: FailCont -> String -> FailCont
-appFail fail s = fail . (s ++)
+appFail fail s = fail . ((s ++ "\n  ") ++)
 
 -- | Apply a substitution scheme to a type expression
 apply :: Subst -> TyExpr -> TyExpr
@@ -422,7 +422,7 @@ tiFunc ctxt fname fdef@(FuncDefn args _ expr) = do
   doKindCheck failCtxt ty = case kindCheck (tycons ctxt) ty of
     Left e -> appFail fail failCtxt e
     Right () -> return ()
-  fail s = throwE ("In function declaration '" ++ fname ++ "', " ++ s)
+  fail s = throwE ("In function declaration '" ++ fname ++ "',\n  " ++ s)
   mapf f (args, retTy, exp) = (map (second f) args, f retTy
                               , modifyTypesE f exp)
   newArg (TypedIdent x _) = (,) x <$> newTyVar "a" Flex

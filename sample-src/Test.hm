@@ -19,4 +19,4 @@ finStream(accum) = case accum
     }
   };
 
-main() = printStream(accumPrinter, finStream(And(0, 10)));
+main() = printStream(accumPrinter, finStream(And(0, 1024 * 1024)));
