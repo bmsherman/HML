@@ -1,0 +1,30 @@
+data Ordering() of LT() | EQ() | GT();
+
+ordInt(x, y) = case x <= y
+  { True() => case x < y
+    { True() => LT()
+    | False() => EQ()
+    }
+  | False() => GT()
+  };
+
+ordOrd(a, b) = case a
+  { LT() => case b
+    { LT() => EQ()
+    | EQ() => LT()
+    | GT() => LT()
+    }
+  | EQ() => case b
+    { LT() => GT()
+    | EQ() => EQ()
+    | GT() => LT()
+    }
+  | GT() => case b
+    { LT() => GT()
+    | EQ() => GT()
+    | GT() => EQ()
+    }
+  };
+
+reverseOrdering(ord) = case ord
+  { LT() => GT() | EQ() => EQ() | GT() => LT() };

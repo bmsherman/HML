@@ -1,0 +1,44 @@
+-- import Ord.hm
+data Nat() of Z() | S(Nat());
+
+plusN(m, n) = case m
+  { Z()   => n
+  | S(m') => S( plusN(m', n) )
+  };
+
+timesN(m, n) = case m
+  { Z()   => Z()
+  | S(m') => plusN(n, timesN(m', n))
+  };
+
+powN(m, n) = case n
+  { Z() => S(Z())
+  | S(n') => timesN(m, powN(m, n'))
+  };
+
+toInt(n) = case n
+  { Z() => 0
+  | S(n') => toInt(n') + 1
+  };
+
+eqNat(m, n) = case m
+  { Z() => case n
+    { Z() => True()
+    | S(n') => False()
+    }
+  | S(m') => case n
+    { Z() => False()
+    | S(n') => eqNat(m', n')
+    }
+  };
+
+ordNat(m, n) = case m
+  { Z() => case n
+    { Z() => EQ()
+    | S(n') => LT()
+    }
+  | S(m') => case n
+    { Z() => GT()
+    | S(n') => ordNat(m', n')
+    }
+  };

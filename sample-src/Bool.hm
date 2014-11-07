@@ -1,3 +1,4 @@
+-- import Ord.hm
 not(x) = case x
   { True() => False()
   | False() => True()
@@ -16,4 +17,15 @@ or(x, y) = case x
 eqBool(x, y) = case x
   { True() => y
   | False() => not(y)
+  };
+
+ordBool(x, y) = case x
+  { False() => case y
+    { False() => EQ()
+    | True() => LT()
+    }
+  | True() => case y
+    { False() => GT()
+    | True() => EQ()
+    }
   };

@@ -1,5 +1,4 @@
--- import List.hm
-data Ordering() of LT() | EQ() | GT();
+-- import List.hm, Ord.hm
 data TreeI(a) of Leaf() | Branch(a, TreeI(a), TreeI(a));
 data Tree(a) of Tree((a, a) -> Ordering() , TreeI(a));
 
@@ -54,5 +53,8 @@ printBool(x) = case x
   { True() => out_string("True")
   | False() => out_string("False")
   };
+
+treeSort(ord, xs) = case listToBST(ord, xs) 
+  { Tree(ord', tree) => inOrder(tree) };
 
 main() = printBool(memberBST(32, listToBST(compareInt, [5,32,56,1,10])));

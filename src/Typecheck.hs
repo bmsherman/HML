@@ -3,11 +3,11 @@ module Typecheck where
 
 import AST
 
-import Control.Applicative ((<$>), (<|>))
+import Control.Applicative ((<$>), (<*>), (<|>))
 import Control.Arrow (second, left)
-import Control.Monad (foldM, zipWithM, guard, zipWithM_)
+import Control.Monad (foldM, join, zipWithM, guard, zipWithM_)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.State (State, put, get, runState)
+import Control.Monad.Trans.State (State, put, get, runState, modify)
 import Control.Monad.Trans.Except (ExceptT, throwE, runExceptT)
 
 import Data.List (intercalate)
@@ -80,26 +80,26 @@ kindCheck tycs ty = case ty of
            [1..] es
       else Left $ "type constructor '" ++ tcon ++ "' expects " ++ show arity
         ++ plural arity " argument" ++ " but received " ++ show l
+  TArr argTys retTy -> mapM_ (kindCheck tycs) (argTys ++ [retTy])
   _ -> Right ()
 
 -- | pretty-print a typing context
 pprintContext :: Context -> String
-pprintContext (Context ts tycs) = intercalate "\n" 
-  . intercalate [""]
-  $ [mp ppTyCons tycs, mp ppTerm ts]
+pprintContext (Context ts tycs) = intercalate "\n" . intercalate [""] $
+  [mp ppTyCons tycs, mp ppTerm ts]
   where
   mp f = M.elems . M.mapWithKey f
   ppTerm name (Q vars ty) = ppQuantified vars ++ name ++ " : " 
     ++ pprintTyExpr ty
+  ppTyCons name arity = "type constructor " ++ name ++ 
+    "(" ++ intercalate ", " (take arity (map (:[]) ['a'..])) ++ ")"
+  ppQuantified vars = ""
   ppFunc name (inj, Q vars (args, ret)) = ppQuantified vars ++ fType 
     ++ " " ++ name ++ "(" ++ intercalate ", " (map pprintTyExpr args)
     ++ ") : " ++ pprintTyExpr ret
     where
     fType = case inj of 
       { DataCon -> "data constructor"; Func -> "function" }
-  ppTyCons name arity = "type constructor " ++ name ++ 
-    "(" ++ intercalate ", " (take arity (map (:[]) ['a'..])) ++ ")"
-  ppQuantified vars = "" --"For all " ++ concatMap (++ ", ") (S.toList vars)
 
 -- | Merge two disjoint typing contexts. Throw an error if there are any
 -- overlapping names.
@@ -127,12 +127,6 @@ type FailCont = forall a. String -> TypeCheck a
 appFail :: FailCont -> String -> FailCont
 appFail fail s = fail . (s ++)
 
-nullSubst :: Subst
-nullSubst = M.empty
-
-composeSubst :: Subst -> Subst -> Subst
-g `composeSubst` f = g `M.union` M.map (apply g) f
-
 -- | Apply a substitution scheme to a type expression
 apply :: Subst -> TyExpr -> TyExpr
 apply = M.foldr (.) id . M.mapWithKey subst
@@ -148,17 +142,13 @@ strictZipWith f = g (0 :: Int) where
 
 -- | Unify type expressions, ensuring that all substitutions have already
 -- been applied
-unify' :: FailCont
-  -> TyExpr -> TyExpr -> TypeCheck TyExpr
-unify' fail ty1 ty2 = do
-  ty1' <- evalTy ty1
-  ty2' <- evalTy ty2
-  unify fail ty1' ty2'
+unify' :: FailCont -> TyExpr -> TyExpr -> TypeCheck TyExpr
+unify' fail ty1 ty2 = join $ unify fail <$> evalTy ty1 <*> evalTy ty2
 
 -- | Apply all of the current substitutions to a type expression
 evalTy :: TyExpr -> TypeCheck TyExpr
-evalTy ty = do
-  TIState _ subst <- lift get
+evalTy ty = lift $ do
+  TIState _ subst <- get
   return (apply subst ty)
 
 plural :: Int -> String -> String
@@ -218,15 +208,15 @@ varBind fail u@(TV flex name) t = case t of
   _ | flex == Rigid -> fail
     ("cannot match rigid type variable '" ++ name ++ "' with type "
         ++ pprintTyExpr t)
-  _ -> do
-      addSubst name t
-      return t
+  _ -> addSubst name t >> return t
 
 -- | Add a substitution to the current map of substitutions
 addSubst :: String -> TyExpr -> TypeCheck ()
-addSubst u t = do
-  TIState i subst <- lift get
-  lift $ put (TIState i (M.singleton u t `composeSubst` subst))
+addSubst u t = lift . modify $ \(TIState i subst) ->
+  TIState i (M.singleton u t `composeSubst` subst)
+  where
+  g `composeSubst` f = g `M.union` M.map (apply g) f
+
 
 -- | Compute all the free variables in a quantified type scheme
 freeVarsQ :: Quantified TyExpr -> Set String
@@ -258,11 +248,11 @@ data TIState = TIState (Set String) Subst deriving Show
 
 -- Create a new type variable
 newTyVar :: String -> Flex -> TypeCheck TyExpr
-newTyVar str flex = do
-  TIState used s <- lift get
+newTyVar str flex = lift $ do
+  TIState used s <- get
   let name : _ = [ n | ext <- "" : map show [ 1 :: Int .. ]
                        , let n = str ++ ext, not (S.member n used) ]
-  lift (put (TIState (S.insert name used) s))
+  put (TIState (S.insert name used) s)
   return (TyVar (TV flex name))
 
 addUsedTyVar :: String -> TypeCheck ()
@@ -456,17 +446,15 @@ modifyTypesE f = g where
 
 -- | Run our typechecking computation
 runTypeCheck :: TypeCheck a -> (Either String a, TIState)
-runTypeCheck t = runState (runExceptT t) initTIState
-  where 
-  initTIState = TIState S.empty M.empty
+runTypeCheck t = runState (runExceptT t) (TIState S.empty M.empty)
 
 -- | Substitute a type variable name with a given expression
 -- in a type expression.
 subst :: String -> TyExpr -> (TyExpr -> TyExpr)
 subst a e = f where
   f ty = case ty of
+    TyVar (TV _ a') | a == a' -> e
     TArr argTys retTy -> TArr (map f argTys) (f retTy)
-    TyVar (TV _ a') -> if a == a' then e else ty
     TAp tycon exprs -> TAp tycon (map f exprs)
     _ -> ty
 
