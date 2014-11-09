@@ -1,0 +1,32 @@
+-- Polymorphic arrays with bounds-checking
+data SafeArray(a) of SafeArray(Array(a), Int);
+
+data Maybe(a) of Just(a) | Nothing();
+
+
+makeSafeArray(size, defaultVal) = 
+  SafeArray( makeArray(size, defaultVal) , size );
+
+arraySize(x) = case x { SafeArray(arr, size) => size };
+
+boundsCheck(index, size) = case index >= 0
+  { True() => case index < size
+    { True() => True()
+    | False() => False()
+    }
+  | False() => False()
+  };
+
+setSafe(sarr, pos, val) = case sarr
+  { SafeArray(arr, size) => case boundsCheck(pos, size)
+    { True() => Just( set(arr, pos, val) )
+    | False() => Nothing()
+    }
+  };
+
+getSafe(sarr, pos) = case sarr
+  { SafeArray(arr, size) => case boundsCheck(pos, size)
+    { True() => Just( get(arr, pos) )
+    | False() => Nothing()
+    }
+  };

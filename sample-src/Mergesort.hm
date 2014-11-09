@@ -1,4 +1,7 @@
+-- Linked lists
 data List(a) of Nil() | Cons(a, List(a));
+
+--Polymorphic pairs (tuples)
 data And(a, b) of And(a, b);
 
 dealHelper(tf, ls, rs, xs) = case xs
@@ -9,8 +12,11 @@ dealHelper(tf, ls, rs, xs) = case xs
     }
   };
 
+-- Split a list into two lists whose sizes differ by no more than 1.
 deal(xs) = dealHelper(True(), [], [], xs);
 
+-- The merge step of the mergesort algorithm. lte(x,y) is True()
+-- if and only if x <= y.
 merge(lte, xs, ys) = case xs
   { Nil() => ys
   | Cons(a, as) => case ys
@@ -22,6 +28,7 @@ merge(lte, xs, ys) = case xs
     }
   };
 
+-- Is the list of empty or a singleton?
 isSmall(xs) = case xs
   { Nil() => True()
   | Cons(y, ys) => case ys
@@ -30,15 +37,19 @@ isSmall(xs) = case xs
     }
   };
 
+-- Sort a list using the predicate 'lte' using the mergesort algorithm.
 mergesort(lte, xs) = case isSmall(xs) 
   { True() => xs
   | False() => case deal(xs)
     { And(ls, rs) => merge(lte, mergesort(lte, ls) , mergesort(lte, rs) ) }
   };
 
+-- Print the elements of a list on each line, using the 'print' function
+-- to print each element.
 listLine(print, xs) = case xs
   { Nil() => 0
   | Cons(y, ys) => print(y) >> out_string("\n") >> listLine(print, ys)
   };
 
+-- An example use of the mergesort function.
 main() = listLine(out_int, mergesort(lteInt, [13, 5, 2, 10, 3]));

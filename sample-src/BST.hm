@@ -1,13 +1,21 @@
--- import List.hm, Ord.hm
-data TreeI(a) of Leaf() | Branch(a, TreeI(a), TreeI(a));
-data Tree(a) of Tree((a, a) -> Ordering() , TreeI(a));
+-- linked lists
+data List(a) of Cons(a, List(a)) | Nothing();
 
-inOrder(tree) = case tree
+data Ordering() of LT() | EQ() | GT();
+
+-- binary trees
+data TreeI(a) of Leaf() | Branch(a, TreeI(a), TreeI(a));
+
+-- binary trees with a notion of ordering on the elements
+data Tree(a) of Tree( (a, a) -> Ordering() , TreeI(a) );
+
+-- in-order traversal of a tree
+inOrder(tree : TreeI(a)) : List(a) = case tree
   { Leaf() => Nil()
   | Branch(x, l, r) => append(inOrder(l), Cons(x, inOrder(r)))
   };
 
-compareInt(x, y) = case x < y
+compareInt(x : a, y : a) : Ordering() = case x < y
   { True() => LT()
   | False() => case x == y
     { True() => EQ()
@@ -18,6 +26,8 @@ compareInt(x, y) = case x < y
 
 -- Some binary search tree operations
 
+-- Insert an element into a binary search tree. If an equal element is
+-- already present, replace it with the new element.
 insertBSTI(ord, x, tree) = case tree
   { Leaf() => Branch(x, Leaf(), Leaf())
   | Branch(y, l, r) => case ord(x, y)
@@ -30,6 +40,7 @@ insertBSTI(ord, x, tree) = case tree
 insertBST(x, tree) = case tree
   { Tree(ord, treeI) => insertBSTI(ord, x, treeI) };
 
+--Does an element exist in a binary search tree?
 memberBSTI(ord, x, tree) = case tree
   { Leaf() => False()
   | Branch(y, l, r) => case ord(x,y)
@@ -42,6 +53,7 @@ memberBSTI(ord, x, tree) = case tree
 memberBST(x, tree) = case tree 
   { Tree(ord, treeI) => memberBSTI(ord, x, treeI) };
 
+-- Make a binary search tree from a list using a given comparison operator.
 listToBSTI(ord, xs) = case xs
   { Nil() => Leaf()
   | Cons(y, ys) => insertBSTI(ord, y, listToBSTI(ord, ys))
@@ -54,7 +66,10 @@ printBool(x) = case x
   | False() => out_string("False")
   };
 
+-- Sort a list by creating a binary search tree and then flattening it
+-- with an in-order traversal
 treeSort(ord, xs) = case listToBST(ord, xs) 
   { Tree(ord', tree) => inOrder(tree) };
 
+-- An example use of these binary search tree functions
 main() = printBool(memberBST(32, listToBST(compareInt, [5,32,56,1,10])));

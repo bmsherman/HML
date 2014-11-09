@@ -1,18 +1,28 @@
+-- This module defines polymorphic linked lists and several
+-- handy operations on them
+
 data List(a) of Nil() | Cons(a, List(a));
 
+-- append two lists
 append(xs : List(a), ys : List(a)) : List(a) = case xs
   { Nil() => ys
   | Cons(z,zs) => Cons(z, append(zs,ys))
   };
 
+-- If a list is non-empty, return its first element. Otherwise, crash
+-- the program.
 head(xs) = case xs { Cons(y, ys) => y };
 
+-- If a list is non-empty, return the list with the first element removed.
+-- Otherwise, crash the program.
 tail(xs) = case xs { Cons(y, ys) => ys };
 
 lastHelper(x, xs) = case xs
   { Nil() => x
   | Cons(y, ys) => lastHelper(y, ys)
   };
+-- If a list is non-empty, return its last element. Otherwise, crash
+-- the program.
 last(xs) = case xs
   { Nil() => error("last: empty list")
   | Cons(y, ys) => lastHelper(y, ys)
@@ -23,21 +33,26 @@ initHelper(x, xs) = case xs
   | Cons(y, ys) => Cons(x, initHelper(y, ys))
   };
 
+-- If a list is non-empty, return the list with the last element removed.
+-- Otherwise, crash the program.
 init(xs) = case xs
   { Nil() => error("init: empty list")
   | Cons(y, ys) => initHelper(y, ys)
   };
 
+-- Is the list empty?
 null(xs) = case xs
   { Nil() => True()
   | Cons(y, ys) => False()
   };
 
+-- The number of elements in the list
 length(xs) = case xs
   { Nil() => 0
   | Cons(y, ys) => 1 + length(ys)
   };
 
+-- Map a function over a list
 map(f, xs) = case xs
   { Nil() => Nil()
   | Cons(y, ys) => Cons( f(y) , map(f, ys) )
@@ -48,8 +63,10 @@ reverseHelper(acc, xs) = case xs
   | Cons(y, ys) => reverseHelper( Cons(y, acc), ys )
   };
 
+-- Reverse a list
 reverse(xs) = reverseHelper(Nil(), xs);
 
+-- Right-associative fold
 foldr(f : (a, b) -> b, z : b, xs : List(a)) : b = case xs
   { Nil() => z
   | Cons(y, ys) => f( y, foldr(f, z, ys))

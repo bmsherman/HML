@@ -1,16 +1,19 @@
--- import Ord.hm
+-- Natural numbers, Peano style!
 data Nat() of Z() | S(Nat());
 
+-- m + n
 plusN(m, n) = case m
   { Z()   => n
   | S(m') => S( plusN(m', n) )
   };
 
+-- m * n
 timesN(m, n) = case m
   { Z()   => Z()
   | S(m') => plusN(n, timesN(m', n))
   };
 
+-- m ^ n
 powN(m, n) = case n
   { Z() => S(Z())
   | S(n') => timesN(m, powN(m, n'))
@@ -31,6 +34,8 @@ eqNat(m, n) = case m
     | S(n') => eqNat(m', n')
     }
   };
+
+data Ordering() of LT() | EQ() | GT();
 
 ordNat(m, n) = case m
   { Z() => case n

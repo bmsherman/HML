@@ -1,11 +1,15 @@
 data Bool() of True() | False();
 data Unit() of Unit();
 
+-- Function arguments are evaluated from left to right, so the
+-- seq function effectively evaluates its first argument and discards
+-- it before evaluating the second and returning it.
 seq(x, y) = y; -- >>
 
 -- 'error' is specially compiled. It prints the message and then
 -- aborts the program.
 error(message : String) : a = case message {};
+
 undefined() = error("undefined");
 
 -- Integer operations

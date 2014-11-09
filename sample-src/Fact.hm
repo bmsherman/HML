@@ -1,3 +1,4 @@
+-- Compute the factorial of an integer
 fact (x : Int) = case x <= 0
     {  True()  => 1
     | False() => x * fact(x - 1) };
@@ -8,6 +9,7 @@ fibsHelper (acc1 : Int , acc2 : Int, n : Int) : Int =
     | False() => fibsHelper(acc2, acc1 + acc2, n - 1)
     };
 
+-- Compute the nth number in the Fibonacci sequence
 fibs(n : Int) : Int = case n <= 1
   { True()  => 1
   | False() => fibsHelper(1 , 1, n - 1)
@@ -15,6 +17,7 @@ fibs(n : Int) : Int = case n <= 1
 
 data List(a) of Nil() | Cons(a, List(a));
 
+-- create a list of the Fibonacci sequence from "start" to "end"
 allFibs(start : Int, end : Int) : List(Int) = case end < start
   {  True()  => Nil()
   | False() => Cons(fibs(start), allFibs(start + 1, end))

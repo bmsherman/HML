@@ -1,0 +1,37 @@
+-- Never-ending streams of data.
+-- The second argument of the 'Cons' is intended to be
+-- called with the first argument as an argument.
+data Stream(a) of Cons(a, (a) -> Stream(a));
+
+-- Tuples
+data And(a, b) of And(a, b);
+
+-- Print the elements of a list. This function is productive, but
+-- will never terminate (unless with an error).
+printStream(print : (a) -> b, xs : Stream(a)) = case xs
+  { Cons(x, f) => print(x) >> printStream(print, f(x))
+  };
+
+-- Stream for computing all the factorials. Quickly runs into an
+-- integer overflow, hits 0, and stays there.
+factStream(accum) = case accum
+  { And(acc, n) => Cons(And(acc * n, n + 1), factStream) };
+
+-- Print the first element of a tuple which has an integer as the first
+-- component. And then print a newline.
+accumPrinter(accum) = case accum
+  { And(acc, n) => out_int(acc) >> out_string("\n")
+  };
+
+-- A stream of finite numbers less than a certain amount, which resets
+-- to 0 once the limit is reached. Said differently, it's
+-- counting with integers modulo a certain number.
+finStream(accum) = case accum
+  { And(n, lim) => case n < lim
+    { True() => Cons( And(n + 1, lim), finStream )
+    | False() => Cons( And(0, lim), finStream )
+    }
+  };
+
+-- An example use of finStream.
+main() = printStream(accumPrinter, finStream(And(0, 1024)));

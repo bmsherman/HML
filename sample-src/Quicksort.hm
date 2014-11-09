@@ -1,6 +1,12 @@
+-- Linked lists
 data List(a) of Nil() | Cons(a, List(a));
+
+-- Polymorphic pairs (tuples)
 data And(a, b) of And(a, b);
 
+-- Partition a list according to a comparison function and a pivot element.
+-- The first component contains the elements not greater than the pivot,
+-- and the second contains the elements greater than the pivot.
 partition(lte, k, xs) = case xs
   { Nil() => And(Nil(), Nil())
   | Cons(y, ys) => case partition(lte, k, ys)
@@ -27,5 +33,6 @@ listLine(print, xs) = case xs
   | Cons(y,ys) => print(y) >> out_string("\n") >> listLine(print, ys)
   };
 
+-- An example use of the quicksort algorithm.
 main() = listLine(out_int, quicksort(lteInt, [13, 5, 2, 10, 6]));
 
