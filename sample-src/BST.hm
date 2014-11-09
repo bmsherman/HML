@@ -1,5 +1,5 @@
 -- linked lists
-data List(a) of Cons(a, List(a)) | Nothing();
+data List(a) of Cons(a, List(a)) | Nil();
 
 data Ordering() of LT() | EQ() | GT();
 
@@ -9,13 +9,18 @@ data TreeI(a) of Leaf() | Branch(a, TreeI(a), TreeI(a));
 -- binary trees with a notion of ordering on the elements
 data Tree(a) of Tree( (a, a) -> Ordering() , TreeI(a) );
 
+append(xs, ys) = case xs
+  { Nil() => ys
+  | Cons(x, xs') => Cons(x, append(xs', ys))
+  };
+
 -- in-order traversal of a tree
 inOrder(tree : TreeI(a)) : List(a) = case tree
   { Leaf() => Nil()
   | Branch(x, l, r) => append(inOrder(l), Cons(x, inOrder(r)))
   };
 
-compareInt(x : a, y : a) : Ordering() = case x < y
+compareInt(x, y) = case x < y
   { True() => LT()
   | False() => case x == y
     { True() => EQ()
@@ -38,7 +43,7 @@ insertBSTI(ord, x, tree) = case tree
   };
 
 insertBST(x, tree) = case tree
-  { Tree(ord, treeI) => insertBSTI(ord, x, treeI) };
+  { Tree(ord, treeI) => Tree(ord, insertBSTI(ord, x, treeI)) };
 
 --Does an element exist in a binary search tree?
 memberBSTI(ord, x, tree) = case tree

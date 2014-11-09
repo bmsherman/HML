@@ -171,19 +171,19 @@ Typing :: { Maybe TyExpr }
 
 processDecl :: Decl -> Alex Decl
 processDecl d = do
-  (ctxt, errors) <- alexGetUserState
+  (ctxt, prefix, errors) <- alexGetUserState
   let result = (unionC ctxt =<<) $ case d of
 	DataDecl tycon datadef ->
-	  left (map (\x -> "In data declaration '" ++ tycon ++ "', " ++ x) ) $
+	  left (map (\x -> "In data declaration '" ++ tycon ++ "', \n  " ++ x) ) $
             dataDefCtxt (tycons ctxt)
               =<< elabDataDef tycon datadef
 	FuncDecl nt funcDef ->
 	  left (:[]) 
 	    $ funcCtxt ctxt nt funcDef
-  prefix <- prefixPos
+  prefix' <- prefixPos
   alexSetUserState $ case result of
-    Left es -> (ctxt, [ prefix ++ ": " ++ x | x <- es ] ++ errors)
-    Right ctxt' -> (ctxt', errors)
+    Left es -> (ctxt, prefix', [ prefix ++ ": " ++ x | x <- es ] ++ errors)
+    Right ctxt' -> (ctxt', prefix', errors)
   return d
 
 lexwrap :: (Token -> Alex a) -> Alex a
@@ -199,8 +199,8 @@ cmpFunc (Tok x) = (++ "Int") $ case x of
 
 prefixPos :: Alex String
 prefixPos = do
-  (AlexPn _ l c, _, _, _) <- alexGetInput
-  return $ "Line " ++ show l ++ ", column " ++ show c
+  (AlexPn _ l _, _, _, _) <- alexGetInput
+  return $ "Line " ++ show l
 
 happyError :: Token -> Alex a
 happyError tok = do
@@ -209,9 +209,10 @@ happyError tok = do
 
 parseDecls :: Context -> String -> Either String ([Decl], (Context, [String]))
 parseDecls ctxt s = runAlex s $ do
-  alexSetUserState (ctxt, [])
+  prefix <- prefixPos
+  alexSetUserState (ctxt,prefix, [])
   decls <- parse
-  (ctxt, errors) <- alexGetUserState
+  (ctxt, _, errors) <- alexGetUserState
   return (reverse decls, (ctxt, reverse errors))
 
 }

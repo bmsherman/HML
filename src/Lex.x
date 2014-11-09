@@ -64,9 +64,9 @@ lex f = \(_,_,_,s) i -> return (f (take i s))
 lexc :: a -> AlexAction a
 lexc = lex . const
 
-type AlexUserState = (Context, [String])
+type AlexUserState = (Context, String, [String])
 
 alexInitUserState :: AlexUserState
-alexInitUserState = (emptyContext, [])
+alexInitUserState = (emptyContext, "", [])
 
 }  

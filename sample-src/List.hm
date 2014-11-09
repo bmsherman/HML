@@ -66,6 +66,12 @@ reverseHelper(acc, xs) = case xs
 -- Reverse a list
 reverse(xs) = reverseHelper(Nil(), xs);
 
+-- Create a list of length 'n' where all the elements are the element 'x'.
+replicate(n, x) = case n <= 0
+  { True() => Nil()
+  | False() => Cons(x, replicate(n - 1, x))
+  };
+
 -- Right-associative fold
 foldr(f : (a, b) -> b, z : b, xs : List(a)) : b = case xs
   { Nil() => z

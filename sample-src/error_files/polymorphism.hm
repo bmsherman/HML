@@ -8,7 +8,7 @@ alt(x, y) = case x
 
 occursCheck(x) = alt(x, Just(x));
 
-tyVarScope(x : b) : a = x : a;
+tyVarScope(x : b) = x : a;
 
 scrutinee(x : List(Int)) = case x 
   { Cons(y, ys) => 0
