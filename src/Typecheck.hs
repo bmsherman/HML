@@ -17,24 +17,10 @@ import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
 
--- | elaborate data declaration (part 1)
-elabDataDef :: NTyCon -> DataDefn -> Either [String] DataDef
-elabDataDef tyName (DataDefn vars dataAlts) = 
-  case [ "in data constructor "
-         ++ dN ++ ",\n  type variable '" ++ tyVar ++ "' not in scope."
-       | DataAlt dN exprs <- dataAlts, e <- exprs
-       , tyVar <- S.toList (freeVarsQ (Q varSet e)) ] of
-    [] -> Right (DataDef tyName vars dataAlts)
-    errs -> Left errs
-  where
-  varSet = S.fromList vars
-
-data DataDef = DataDef String [String] [DataAlt] deriving Show
-
--- | Elaborate data declaration (part 2)
-dataDefCtxt :: Map String Arity -> DataDef 
+-- | Elaborate data declaration
+dataDefCtxt :: Map String Arity -> NTyCon -> DataDefn
   -> Either [String] Context
-dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
+dataDefCtxt tycs tyName (DataDefn vars dataAlts) = do
   mLefts  [ left (("in data constructor '" ++ dcon ++ "', \n  ") ++) 
              $ kindCheck tycs' e
              | DataAlt dcon es <- dataAlts, e <- es ]
@@ -48,8 +34,9 @@ dataDefCtxt tycs (DataDef tyName vars dataAlts) = do
   tycs' = M.insert tyName arity tycs
   arity = S.size varSet
   varSet = S.fromList vars
-  funcs = M.fromList [ (dcon, Q varSet (TArr x tyExpr))
-    | DataAlt dcon x <- dataAlts ]
+  funcs = M.fromList [ (dcon, Q varsToUse (TArr x tyExpr))
+    | DataAlt dcon x <- dataAlts
+    , let varsToUse = M.keysSet (M.unions (map freeVars (tyExpr : x))) ]
   varsE = map (TyVar . TV Flex) vars
   tyExpr = TAp tyName varsE
 
@@ -176,7 +163,7 @@ unify fail ty1@(TAp tcon1 e1s)
   else fail' ("expected type constructor " ++ tcon1 
         ++ " but was given " ++ tcon2)
   where fail' = failSubTy fail ty1 ty2
-unify fail (TyVar u@(TV flex _)) (TyVar t) = if flex == Rigid
+unify fail (TyVar u@(TV flex _)) (TyVar t) = if flex /= Flex
   then varBind fail t (TyVar u)
   else varBind fail u (TyVar t)
 unify fail ty1@(TArr args1 ret1) ty2@(TArr args2 ret2) = do
@@ -202,10 +189,10 @@ varBind :: FailCont
   -> TyVar -> TyExpr -> TypeCheck TyExpr
 varBind fail u@(TV flex name) t = case t of
   TyVar u' | u == u' -> return t
-  _ | S.member name (freeVars t) -> fail
+  _ | M.member name (freeVars t) -> fail
       ("occurs check error: unifying type variable '" ++ name ++ 
         "' with type " ++ pprintTyExpr t ++ " would lead to infinite type")
-  _ | flex == Rigid -> fail
+  _ | flex /= Flex -> fail
     ("cannot match rigid type variable '" ++ name ++ "' with type "
         ++ pprintTyExpr t)
   _ -> addSubst name t >> return t
@@ -219,18 +206,19 @@ addSubst u t = lift . modify $ \(TIState i subst) ->
 
 
 -- | Compute all the free variables in a quantified type scheme
-freeVarsQ :: Quantified TyExpr -> Set String
-freeVarsQ (Q vars tyExpr) = freeVars tyExpr S.\\ vars
+freeVarsQ :: Quantified TyExpr -> Map String Flex
+freeVarsQ (Q vars tyExpr) = foldr (.) id (map M.delete (S.toList vars)) 
+  $ freeVars tyExpr
 
 -- | Compute all the free variables in a type expression
-freeVars :: TyExpr -> Set String
+freeVars :: TyExpr -> Map String Flex
 freeVars ty = case ty of
-  TyVar (TV _ a) -> S.singleton a
-  TAp dcon exprs -> S.unions (map freeVars exprs)
-  TArr argTys retTy -> S.unions (map freeVars (retTy : argTys))
-  _ -> S.empty
+  TyVar (TV flex a) -> M.singleton a flex
+  TAp dcon exprs -> M.unions (map freeVars exprs)
+  TArr argTys retTy -> M.unions (map freeVars (retTy : argTys))
+  _ -> M.empty
 
--- | General function for instnatiation a type expression for inference
+-- | General function for instantiation a type expression for inference
 instantiate :: Flex -> ((TyExpr -> TyExpr) -> (a -> a)) -> 
   Quantified a -> TypeCheck a
 instantiate flex mapf (Q vars expr) = do
@@ -240,6 +228,14 @@ instantiate flex mapf (Q vars expr) = do
 -- Instantiate the type of a simple expression
 instantiateE :: Quantified TyExpr -> TypeCheck TyExpr
 instantiateE = instantiate Flex id
+
+instantiateCase :: Quantified TyExpr -> TypeCheck TyExpr
+instantiateCase (Q vars constrTy@(TArr args resTy)) = do
+  nvars <- mapM (\x -> (,) x <$> newTyVar x (flex x)) (S.toList vars)
+  return (apply (M.fromList nvars) constrTy)
+  where
+  flex x = if M.member x resArgs then Flex else Skolem
+  resArgs = freeVars resTy
 
 -- | State when performing Hindley-Milner type inference. The 'Set String' 
 -- holds already-used variables so we don't repeat.  The 'Subst' is
@@ -320,7 +316,7 @@ tiCase fail ctxt ety
       Nothing -> fail ("data constructor " ++ dcon ++
         " not in scope")
       Just scheme -> do
-        TArr argTys retTy <- instantiateE scheme
+        TArr argTys retTy <- instantiateCase scheme
         case strictZipWith zipper argNames argTys of
           Left (i, j) -> fail ("data constructor " ++ dcon ++
             " expects " ++ show j ++ " arguments but receives " ++ show i
@@ -351,22 +347,30 @@ funcCtxt ctxt fname fdef =
 -- | Take the resulting type expression for a function after performing
 -- type inference. Remaining free type variables can be universally
 -- quantified over.
-generalize :: ([TyExpr], TyExpr) -> Quantified ([TyExpr], TyExpr)
-generalize (argTys, retTy) = Q vars (argTys, retTy) where
-  vars = S.unions (map freeVars (retTy : argTys))
+generalize :: ([TyExpr], TyExpr) 
+  -> Either String (Quantified ([TyExpr], TyExpr))
+generalize (argTys, retTy) = 
+  case M.keys (M.filter (==Skolem) vars) of
+    [] -> Right $ Q (M.keysSet vars) (argTys, retTy)
+    skolemVars -> Left $ plural (length skolemVars) "skolem type variable"
+      ++ " " ++ intercalate ", " [ "'" ++ v ++ "'" | v <- skolemVars ]
+      ++ " would escape their scope"
+  where
+  vars = M.unions (map freeVars (retTy : argTys))
 
 -- | Return the set of type variables quantified over in a user-given
 -- function definition.
 funcTyVars :: FuncDefn -> Either String (Set String)
 funcTyVars (FuncDefn args retTy e) = if S.null freeVarsInE
   then Right vars
-  else Left (plural (S.size freeVarsInE) "type variable" ++ " " ++ showV freeVarsInE ++ " not in scope")
+  else Left (plural (S.size freeVarsInE) "type variable" ++ " " 
+             ++ showV freeVarsInE ++ " not in scope")
   where
   vars = S.unions (map freeVarsM (retTy : map getArgTy args))
   showV = intercalate ", " . map (\x -> "'" ++ x ++ "'") . S.toList
   freeVarsInE = freeTyVars e S.\\ vars
   freeVarsM Nothing = S.empty
-  freeVarsM (Just ty) = freeVars ty
+  freeVarsM (Just ty) = M.keysSet (freeVars ty)
   getArgTy (TypedIdent _ mty) = mty
   
 -- | If there are no duplicates in the list, then 'Nothing'; otherwise,
@@ -399,9 +403,9 @@ freeTyVars express = case express of
   EAp _ _ es -> S.unions (map freeTyVars es)
   ECase e prods -> freeTyVars e `S.union` 
     S.unions [ freeTyVars e | Production _ e <- prods ]
-  ELet (TypedIdent term (Just ty)) e1 e2 -> freeVars ty `S.union`
+  ELet (TypedIdent term (Just ty)) e1 e2 -> M.keysSet (freeVars ty) `S.union`
     freeTyVars e1 `S.union` freeTyVars e2
-  Typed e ty -> freeTyVars e `S.union` freeVars ty
+  Typed e ty -> freeTyVars e `S.union` M.keysSet (freeVars ty)
   _ -> S.empty
 
 -- | Type inference for function types
@@ -416,8 +420,9 @@ tiFunc ctxt fname fdef@(FuncDefn args _ expr) = do
   actRetTy <- ti fail (updateCtxt vs expRetTy) expr
   retTy <- unify' fail expRetTy actRetTy
   vs' <- mapM (evalTy . snd) vs
-  let actFuncTy = generalize (vs', retTy)
-  return actFuncTy
+  case generalize (vs', retTy) of
+    Left e -> fail e
+    Right actFuncTy -> return actFuncTy
   where
   doKindCheck failCtxt ty = case kindCheck (tycons ctxt) ty of
     Left e -> appFail fail failCtxt e

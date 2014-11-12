@@ -37,7 +37,7 @@ data TyVar = TV Flex String deriving (Eq, Show)
 -- | A flexible variable may be unified to a more specific type, but
 -- a rigid variable must not ever be unified with something it is not
 -- already requal to.
-data Flex = Flex | Rigid deriving (Eq, Show)
+data Flex = Flex | Rigid | Skolem deriving (Eq, Show)
 
 -- | Distingiush between functions and data constructors
 data Inj = Func | DataCon deriving Show

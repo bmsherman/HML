@@ -175,8 +175,7 @@ processDecl d = do
   let result = (unionC ctxt =<<) $ case d of
 	DataDecl tycon datadef ->
 	  left (map (\x -> "In data declaration '" ++ tycon ++ "', \n  " ++ x) ) $
-            dataDefCtxt (tycons ctxt)
-              =<< elabDataDef tycon datadef
+            dataDefCtxt (tycons ctxt) tycon datadef
 	FuncDecl nt funcDef ->
 	  left (:[]) 
 	    $ funcCtxt ctxt nt funcDef
