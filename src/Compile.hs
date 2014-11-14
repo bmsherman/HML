@@ -77,16 +77,15 @@ instance Show RegGlob where
 
 data Instr = 
     BinOp String Oper Oper
+  | UnOp String Oper
   | Call RegGlob
   | Jump String RegGlob
   | Syscall
-  | Push Oper
-  | Pop Oper
   | Ret
-  | Idiv Oper
 
   | Ascii String
   | Asciz String
+  | Quad Int32
   deriving (Eq, Show)
 
 mov = BinOp "mov"
@@ -95,6 +94,9 @@ movq = BinOp "movq"
 clear oper = BinOp "xor" oper oper
 add = BinOp "add"
 imul = BinOp "imul"
+push = UnOp "push"
+pop = UnOp "pop"
+idiv = UnOp "idiv"
 
 data CDecl = Label String [Instr] deriving (Eq, Show)
 
@@ -135,19 +137,17 @@ printOper o = case o of
 
 printInstr :: Instr -> String
 printInstr i = case i of
-  BinOp s o1 o2 -> binop s o1 o2
+  BinOp s o1 o2 -> unop s o1 ++ ", " ++ printOper o2
   Call rg -> "call " ++ show rg
   Jump name rg -> name ++ " " ++ show rg
   Syscall -> "syscall"
-  Push o -> unop "push" o
-  Idiv o -> unop "idiv" o
-  Pop o -> unop "pop" o
+  UnOp s o -> unop s o
   Ret -> "ret"
   Ascii str -> ".ascii \"" ++ str ++ "\""
   Asciz str -> ".asciz \"" ++ str ++ "\""
+  Quad i -> ".quad " ++ show i
   where
   unop str a = str ++ " " ++ printOper a 
-  binop str a b = unop str a ++ ", " ++ printOper b
 
 printCDecl :: CDecl -> String
 printCDecl (Label name instrs) = name ++ ":\n" ++ 
@@ -155,18 +155,22 @@ printCDecl (Label name instrs) = name ++ ":\n" ++
 
 mkint :: CDecl
 mkint = Label "mkint" $ mkFunc $ \(x:_) ->
-  [ Push (Reg x) ]
+  [ push (Reg x) ]
   ++ callFunc "malloc" [Imm 8] (\addr ->
-  [ Pop (Mem 0 addr)])
+  [ pop (Mem 0 addr)])
 
-constructor :: String -> Int -> CDecl
-constructor name arity = Label name $ mkFunc $ \xs -> 
+constructor :: String -> Int -> [CDecl]
+constructor name 0 = 
+  [ Label (name ++ ".hash") [Quad (hash name)]
+  , Label name [ movq (Global (name ++ ".hash")) (Reg RAX), Ret ]
+  ]
+constructor name arity = [Label name $ mkFunc $ \xs -> 
   let xs' = take arity xs in
-  [ Push (Reg x) | x <- reverse xs' ]
+  [ push (Reg x) | x <- reverse xs' ]
   ++ callFunc "malloc" [Imm (8 * (fromIntegral arity + 1))] (\addr ->
   movq (Imm (hash name)) (Mem 0 addr) : 
-    [ Pop (Mem (8 * i) addr) | i <- take arity [1..] ]
-  )
+    [ pop (Mem (8 * i) addr) | i <- take arity [1..] ]
+  )]
 
 hash :: String -> Int32
 hash = foldl' (\h c -> 33 * h `B.xor` fromIntegral (fromEnum c)) 5381
@@ -181,7 +185,7 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
     then do cleanup <- mkCleanup; return (lbls, instrs ++ cleanup ++ [Ret]) 
     else return r
   ff tailc lbl e = case e of
-    CInt i -> ret tailc ([], (callFunc "mkint" [Imm i] (const [])))
+    CInt i -> ret tailc ([], [mov (Imm i) (Reg RAX)])
     CStr lab str -> let lbl' = lbl ++ lab in
       ret tailc ([Label lbl' [Ascii (str ++ "\\0")]]
       , [mov (Global lbl') (Reg RAX)])
@@ -232,16 +236,16 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
 
 intOp :: (Oper -> Oper -> Instr) -> [Instr]
 intOp op = mkFunc $ \(x:y:_) ->
-  [ mov (Mem 0 x) (Reg RDI)
-  , op (Mem 0 y) (Reg RDI)
-  ] ++ callFunc "mkint" [Reg RDI] (const [])
+  [ mov (Reg x) (Reg RAX)
+  , op (Reg y) (Reg RAX)
+  , Ret
+  ]
 
 cmpOp :: String -> [Instr]
-cmpOp trueCond = ($ funcRegs) $ \(x:y:_) ->
-    [ mov (Mem 0 x) (Reg x)
-    , cmp (Mem 0 y) (Reg x)
-    , Jump trueCond (RGG "True")
-    , Jump "jmp" (RGG "False")
+cmpOp trueCond = mkFunc $ \(x:y:_) ->
+    [ cmp (Reg y) (Reg x)
+    , Jump ("j" ++ trueCond) (RGG "True")
+    , mov (Global "False.hash") (Reg RAX)
     ]
 
 intOps :: [CDecl]
@@ -251,17 +255,17 @@ intOps = [ Label (toSymbolName x) (intOp y)
 
 cmpOps :: [CDecl]
 cmpOps = [ Label (toSymbolName (x ++ "Int")) (cmpOp y)
-  | (x, y) <- [ ("lt", "jl"), ("lte", "jle"), ("eq", "je")
-              , ("gt", "jge"), ("gte", "jg") ]
+  | (x, y) <- [ ("lt", "l"), ("lte", "le"), ("eq", "e")
+              , ("gt", "ge"), ("gte", "g") ]
   ]
 
 divOp :: CDecl
 divOp = Label (toSymbolName "div") $ mkFunc $ \(x:y:_) ->
   [ clear (Reg RDX)
-  , mov (Mem 0 x) (Reg RAX)
-  , mov (Mem 0 y) (Reg RSI)
-  , Idiv (Reg RSI) ]
-  ++ callFunc "mkint" [Reg RAX] (const [])
+  , mov (Reg x) (Reg RAX)
+  , mov (Reg y) (Reg RSI)
+  , idiv (Reg RSI)
+  , Ret ]
 
 data CompileState = CompileState
   { vars :: !(Map String Oper)
@@ -290,7 +294,7 @@ newVar n oldOper = do
   let stackSize' = stackSize + 1
   let oper = Mem 0 RSP
   put (CompileState (M.insert n oper (M.map f vars)) stackSize')
-  return (Push oldOper)
+  return (push oldOper)
   where
   f (Mem i RSP) = Mem (8 + i) RSP
   f x = x
@@ -322,19 +326,20 @@ printf = [ clear (Reg RAX), Call (RGG "printf") ]
 intio :: [CDecl]
 intio = 
   [ Label "out_int" $ mkFunc $ \(x:_) ->
-    [ mov (Mem 0 x) (Reg RSI)
+    [ mov (Reg x) (Reg RSI)
     , mov (Global "int.Format") (Reg RDI) ]
     ++ printf
   , Label "int.Format"
     [ Asciz "%ld" ]
   , Label "in_int" $ mkFunc $ \_ ->
     [ Call (RGG "mkint")
-    , Push (Reg RAX)
+    , push (Reg RAX)
     , mov (Reg RAX) (Reg RSI)
     , mov (Global "int.Format") (Reg RDI)
     , clear (Reg RAX)
     , Call (RGG "scanf")
-    , Pop (Reg RAX)
+    , pop (Reg RAX)
+    , mov (Mem 0 RAX) (Reg RAX)
     ]
   ]
 
@@ -350,13 +355,13 @@ arrayOps =
   , Label "get" $ mkFunc $ \(arr : pos : _) ->
     offset pos arr ++ [ mov (Mem 0 arr) (Reg RAX) ]
   , Label "makeArray" $ mkFunc $ \(size : defVal : _) -> 
-    [ Push (Reg size)
-    , Push (Reg defVal)
+    [ push (Reg size)
+    , push (Reg defVal)
     , imul (Imm 8) (Reg size) ]
     ++ callFunc "malloc" [Reg size] (\arr -> 
-       [Pop (Reg R13), Pop (Reg R12), Push (Reg arr)] ++ 
+       [pop (Reg R13), pop (Reg R12), push (Reg arr)] ++ 
        callFunc "setAll" [Reg arr, Reg R12, Reg R13] (\_ -> 
-         [Pop (Reg RAX)]))
+         [pop (Reg RAX)]))
   ]
   where
   offset pos arr = 
@@ -385,7 +390,7 @@ primOps = mkint : outstring : divOp : intio ++ intOps
 compileDecl :: Decl -> [CDecl]
 compileDecl d = case d of
   DataDecl _ (DataDefn _ alts) ->
-    [ constructor name (length args) | DataAlt name args <- alts ]
+    [ l | DataAlt name args <- alts, l <- constructor name (length args) ]
   FuncDecl fname funcDefn -> func fname funcDefn
 
 toSymbolName :: String -> String
