@@ -27,13 +27,13 @@ Some notable features that HML lacks are:
 
 Let's get to the "Hello, World":
 
-HML```
+```HML
 main() = out_string("Hello, World!");
 ```
 
 Saving this file to `hello.hm`, we can compile and run our program 
 with the following commands:
-bash```
+```bash
 cat hello.hm | HMCompile > hello.S       # generate x64 assembly
 gcc hello.S -o hello                     # assemble and link
 ./hello                                  # run!
@@ -68,7 +68,7 @@ There are two sorts of top-level declarations that can be made in HML:
 data type definitions and function definitions.
 
 Here's data type definition where we define booleans:
-HML```
+```HML
 data Bool() of True() | False();
 ```
 
@@ -84,13 +84,13 @@ constructors must begin with uppercase variables.
 There are two primitive types: `Int`, which represents 64-bit signed integers,
 and `String`, which represents (opaque) strings of ASCII characters. We can
 recursively define a linked list of integers like this:
-HML```
+```HML
 data IntList() of Nil() | Cons(Int, IntList());
 ```
 
 Type variables allow polymorphism. Consider a definition of lists polymorphic
 in the type of their elements:
-HML```
+```HML
 data List(a) of Nil() | Cons(a, List(a));
 ```
 
@@ -103,7 +103,7 @@ Using a type variable in a data constructor, but not in the corresponding
 type constructor, results in existential quantification. For instance, let's
 say that we wish to make a datatype representing arguments of two variables
 for which the first argument has already been applied:
-HML```
+```HML
 data F(a2, b) of F(a1, (a1, a2) -> b);
 ```
 
@@ -111,7 +111,7 @@ data F(a2, b) of F(a1, (a1, a2) -> b);
 , since terms and types are completely different syntactic categories.)
 It might help to imagine this data declaration as creating a function
 declaration that looks like this:
-HML```
+```HML
 F(x : a1, f : (a1, a2) -> b) : F(a2, b) = #magic#;
 ```
 
@@ -147,11 +147,11 @@ productions p ::=
 
 ## Pattern matching
 Only simple pattern matching is allowed. That is, catch-all patterns like this:
-HML```
+```HML
 case True() { v => v };
 ```
 are not allowed, and neither are nested patterns like this:
-HML```
+```HML
 case And(And(1,2), 3) { And(And(x, y), z) => x + y + z };
 ```
 
@@ -161,7 +161,7 @@ Since HML is strict and impure, evaluation order matters. In the case of
 function application, arguments are evaluated from left to right. In the
 let assignment `let v = e1 in e2`, `e1` is evaluated before `e2`.
 The sequencing operator `>>`, is simply syntactic sugar:
-HML```
+```HML
 e1 >> e2         ==>      seq(e1, e2)
 
 seq(x, y) = y
@@ -173,7 +173,7 @@ both in developing as well as documenting code. Type variables may be
 introduced into the scope of a function declaration simply by using them
 inside type annotations for the arguments or the return type. For example,
 we can write
-HML```
+```HML
 seq(x : a, y : b) : b = y;
 ```
 
@@ -181,17 +181,17 @@ These type variables are then in scope in the body of the function definition.
 Type variables cannot be introduced into the scope in any other way.
 For example, the following is invalid, because the type variable 'c' is not
 in scope:
-HML```
+```HML
 myFunction() = Nil() : List(a);
 ```
 even though this is perfectly acceptable:
-HML```
+```HML
 myFunction() : List(a) = Nil() : List(a);
 ```
 
 Explicit type annotations can allow you to make a function's type more
 restrictive than type inference dictates. For example, we can specialize
 the `seq` function to operate only on integers:
-HML```
+```HML
 seqInt(x : Int, y : Int) = seq(x, y);
 ```
