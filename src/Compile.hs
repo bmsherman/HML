@@ -249,9 +249,11 @@ cmpOp trueCond = mkFunc $ \(x:y:_) ->
     ]
 
 intOps :: [CDecl]
-intOps = [ Label (toSymbolName x) (intOp y)
+intOps = negOp : [ Label (toSymbolName x) (intOp y)
   | (x, y) <- [ ("plus", add), ("minus", BinOp "sub"), ("times", imul) ]
-  ]
+  ] where
+  negOp = Label (toSymbolName "negate") $ mkFunc $ \(x:_) ->
+    [ UnOp "neg" (Reg x), mov (Reg x) (Reg RAX) ]
 
 cmpOps :: [CDecl]
 cmpOps = [ Label (toSymbolName (x ++ "Int")) (cmpOp y)
@@ -365,7 +367,7 @@ arrayOps =
   ]
   where
   offset pos arr = 
-    [ mov (Mem 0 pos) (Reg R12)
+    [ mov (Reg pos) (Reg R12)
     , imul (Imm 8) (Reg R12)
     , add (Reg R12) (Reg arr) ]
 

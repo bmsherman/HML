@@ -10,8 +10,7 @@ map(f, xs) = case xs
 
 itemPrinter(x) = out_int(x) >> out_string("\t");
 
-setIt(arr,pos) = set(arr, pos, [1,2,3]);
+setIt(arr,pos) = set(arr, pos, [1,~2,3]);
 
 main() = let arr = makeArray(10, Nil()) in
   setIt(arr,3) >> map(itemPrinter, (get(arr,3)));
-
