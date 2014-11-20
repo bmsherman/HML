@@ -1,0 +1,13 @@
+f(x) = 
+  out_int(x) >>
+  ( let x = 8 in let y = 1 in
+  out_int(x + y) ) >>
+  out_int(x);
+
+
+main() = 
+  let x = 7 in
+  out_int(x) >>
+  (let x = 2 in let y = 3 in
+    f(x) >> out_int(x + y)) >>
+  out_int(x);

@@ -1,0 +1,51 @@
+get_inputLoop(x, size, i) = case i < size
+  { True() =>
+    out_string("> ") >>
+    set(x,i, in_int()) >>
+    get_inputLoop(x, size, i + 1)
+  | False() => Unit()
+  };
+
+get_input(x, size) = get_inputLoop(x, size, 0);
+
+print_inputLoop(x, size, i) = case i < size
+  { True() =>
+    out_int(get(x, i)) >>
+    print_inputLoop(x, size, i + 1)
+  | False() => Unit()
+  };
+
+print_input(x, size) = print_inputLoop(x, size, 0);
+
+smallestLoop(x, small, i, stop) = case i < stop
+  { True() => 
+    let small' = case get(x, i) < get(x, small)
+      { True() => i
+      | False() => small
+      } in
+    smallestLoop(x, small', i + 1, stop)
+  | False() => small
+  };
+
+smallest(x, start, stop) = smallestLoop(x, start, start, stop);
+
+sortLoop(x, size, i) = case i < size - 1
+  { True() =>
+    let e = smallest(x, i, size) in
+    let t = get(x, e) in
+    set(x, e, get(x, i)) >>
+    set(x, i, t) >>
+    sortLoop(x, size, i + 1)
+  | False() => Unit()
+  };
+
+sort(x, size) = sortLoop(x, size, 0);
+
+main() =
+  out_string("Number of elements ") >>
+  let size = in_int() in
+  let x = makeArray(size, 0) in
+  get_input(x, size) >>
+  sort(x, size) >>
+  out_string("\nresult: ") >>
+  print_input(x, size);

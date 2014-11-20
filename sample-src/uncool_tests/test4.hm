@@ -1,0 +1,12 @@
+mainLoop(i) = case i < 5
+  { True() => 
+    out_string(">") >>
+    let y = in_int() in
+    out_string(">") >>
+    let x = in_int() >>
+    out_int(case x < y { True() => y | False() => x }) >>
+    mainLoop(i + 1)
+  | False() => 0
+  };
+
+main() = mainLoop(0);
