@@ -6,4 +6,4 @@ fibonacci(a) = case a < 2
 main() =
   let y = in_int() in
   let x = fibonacci(y) in
-  out_int(x);
+  out_int(x) >> out_string("\n");

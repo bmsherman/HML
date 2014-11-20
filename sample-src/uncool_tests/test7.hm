@@ -11,6 +11,7 @@ get_input(x, size) = get_inputLoop(x, size, 0);
 print_inputLoop(x, size, i) = case i < size
   { True() =>
     out_int(get(x, i)) >>
+    out_string("\n") >>
     print_inputLoop(x, size, i + 1)
   | False() => Unit()
   };
@@ -47,5 +48,5 @@ main() =
   let x = makeArray(size, 0) in
   get_input(x, size) >>
   sort(x, size) >>
-  out_string("\nresult: ") >>
+  out_string("\nresult: \n") >>
   print_input(x, size);

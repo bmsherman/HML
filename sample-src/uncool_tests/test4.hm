@@ -3,8 +3,9 @@ mainLoop(i) = case i < 5
     out_string(">") >>
     let y = in_int() in
     out_string(">") >>
-    let x = in_int() >>
+    let x = in_int() in
     out_int(case x < y { True() => y | False() => x }) >>
+    out_string("\n") >>
     mainLoop(i + 1)
   | False() => 0
   };

@@ -1,7 +1,10 @@
-print_fn(a) = out_int(a * 2);
+out_intln(x) = let ans = out_int(x) in
+  out_string("\n") >> ans;
+
+print_fn(a) = out_intln(a * 2);
 
 main() = 
   let x = 2 in
   let y = 9 in
   let x = print_fn(4 * x + (y-4)) in
-  out_int(x);
+  out_intln(x);

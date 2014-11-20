@@ -153,12 +153,6 @@ printCDecl :: CDecl -> String
 printCDecl (Label name instrs) = name ++ ":\n" ++ 
   intercalate "\n" (map (("  " ++) . printInstr) instrs)
 
-mkint :: CDecl
-mkint = Label "mkint" $ mkFunc $ \(x:_) ->
-  [ push (Reg x) ]
-  ++ callFunc "malloc" [Imm 8] (\addr ->
-  [ pop (Mem 0 addr)])
-
 constructor :: String -> Int -> [CDecl]
 constructor name 0 = 
   [ Label (name ++ ".hash") [Quad (hash name)]
@@ -178,26 +172,35 @@ hash = foldl' (\h c -> 33 * h `B.xor` fromIntegral (fromEnum c)) 5381
 func :: String -> FuncDefn -> [CDecl]
 func fname (FuncDefn args _ expr) = flip evalState initState $ do
   loads <- zipWithM newVar args' (map Reg funcRegs)
-  (decls, instrs) <- ff True fname expr' 
+  (decls, instrs) <- ff Nothing fname expr' 
   return (Label fname (loads ++ instrs) : decls)
   where
-  ret tailc r@(lbls, instrs) = if tailc 
-    then do cleanup <- mkCleanup; return (lbls, instrs ++ cleanup ++ [Ret]) 
-    else return r
+  branchState f = do state <- get; x <- f; put state; return x
+  ret tailc instrs = do
+     cleanup <- mkCleanup initStackSize
+     return (instrs ++ cleanup ++ [retInstr])
+    where
+    (initStackSize, retInstr) = case tailc of
+      Nothing -> (0, Ret)
+      Just (retAddr, ss) -> (ss, Jump "jmp" retAddr)
   ff tailc lbl e = case e of
-    CInt i -> ret tailc ([], [mov (Imm i) (Reg RAX)])
+    CInt i -> (,) [] <$> ret tailc [mov (Imm i) (Reg RAX)]
     CStr lab str -> let lbl' = lbl ++ lab in
-      ret tailc ([Label lbl' [Ascii (str ++ "\\0")]]
-      , [mov (Global lbl') (Reg RAX)])
+      (,) [Label lbl' [Ascii (str ++ "\\0")] ] <$>
+        ret tailc [mov (Global lbl') (Reg RAX)]
     CVar v -> do
       oper <- getVar v
-      ret tailc ([], [mov oper (Reg RAX)])
+      (,) [] <$> ret tailc [mov oper (Reg RAX)]
     CLet v (CVar v1) e -> dupVar v v1 >> ff tailc lbl e
     CLet v e1 e2 -> do
-      (decls, instrs) <- ff False (lbl ++ ".l") e1
+      let lblL = lbl ++ ".L"
+      ss <- gets stackSize
+      let tailc' = Just (RGG lblL, ss)
+      (decls, instrs) <- branchState $ ff tailc' (lbl ++ ".l") e1
       load <- newVar v (Reg RAX)
-      (decls2, instrs2) <- ff tailc (lbl ++ ".L") e2
-      return (decls ++ decls2, instrs ++ [load] ++ instrs2)
+      (decls2, instrs2) <- ff tailc lblL e2
+      return (Label lblL (load : instrs2) : decls ++ decls2
+             , instrs)
     CAp f xs -> do
       moper <- mGetVar f
       let (loadF, rgF) = case moper of
@@ -205,9 +208,9 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
             Just oper -> ([movq oper (Reg R12)], RGR R12)
       argOpers <- mapM getVar xs
       let loadArgs = zipWith mov argOpers (map Reg funcRegs)
-      cleanup <- if tailc then mkCleanup else return []
-      let fcallOp = (if tailc then Jump "jmp" else Call) rgF
-      return ([], loadArgs ++ loadF ++ cleanup ++ [fcallOp])
+      (,) [] <$> case tailc of
+        Nothing -> ret (Just (rgF, 0)) (loadArgs ++ loadF)
+        Just _ -> ret tailc (loadArgs ++ loadF ++ [Call rgF])
     CCase v prods -> do
       oper <- getVar v
       (decls, instrs) <- unzip <$> mapM (mkCase tailc lbl) prods
@@ -216,15 +219,15 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
         callFunc "error" [Global errorLbl] (const [])
         )
   
-  mkCase tailc lbl (Production (Pattern constr vars) expr) = do
-    state <- get
+  mkCase tailc lbl (Production (Pattern constr vars) expr) = branchState $ do
     loads <- zipWithM f [1..] vars
     (decls, instrs) <- ff tailc lbl' expr
-    put state
-    return ( Label lbl' (loads ++ instrs) : decls ,
-      [ BinOp "cmpl" (Imm (hash constr)) (Mem 0 RAX)
-      , Jump "je" (RGG lbl') ] )
+    instrs' <- ret tailc (loads ++ instrs)
+    return ( Label lbl' instrs' : decls ,
+      conditionalCall )
     where
+    conditionalCall = [ BinOp "cmpl" (Imm (hash constr)) (Mem 0 RAX)
+           , Jump "je" (RGG lbl') ]
     lbl' = lbl ++ "." ++ constr
     f i v = newVar v (Mem (8 * i) RAX)
 
@@ -238,7 +241,6 @@ intOp :: (Oper -> Oper -> Instr) -> [Instr]
 intOp op = mkFunc $ \(x:y:_) ->
   [ mov (Reg x) (Reg RAX)
   , op (Reg y) (Reg RAX)
-  , Ret
   ]
 
 cmpOp :: String -> [Instr]
@@ -274,9 +276,10 @@ data CompileState = CompileState
   , stackSize :: !Int
   }
 
-mkCleanup :: Compile [Instr]
-mkCleanup = do
-  i <- gets stackSize
+mkCleanup :: Int -> Compile [Instr]
+mkCleanup init = do
+  fin <- gets stackSize
+  let i = fin - init
   return [ add (Imm (8 * fromIntegral i)) (Reg RSP) | i > 0 ]
 
 initState :: CompileState
@@ -334,15 +337,15 @@ intio =
   , Label "int.Format"
     [ Asciz "%ld" ]
   , Label "in_int" $ mkFunc $ \_ ->
-    [ Call (RGG "mkint")
-    , push (Reg RAX)
-    , mov (Reg RAX) (Reg RSI)
-    , mov (Global "int.Format") (Reg RDI)
-    , clear (Reg RAX)
-    , Call (RGG "scanf")
-    , pop (Reg RAX)
-    , mov (Mem 0 RAX) (Reg RAX)
-    ]
+    callFunc "malloc" [Imm 8] $ \addr -> 
+      [ push (Reg addr)
+      , mov (Reg addr) (Reg RSI)
+      , mov (Global "int.Format") (Reg RDI)
+      , clear (Reg RAX)
+      , Call (RGG "scanf")
+      , pop (Reg RAX)
+      , mov (Mem 0 RAX) (Reg RAX)
+      ]
   ]
 
 outstring :: CDecl
@@ -386,7 +389,7 @@ errorDecls = [ Label "error" $
   ]
 
 primOps :: [CDecl]
-primOps = mkint : outstring : divOp : intio ++ intOps 
+primOps = outstring : divOp : intio ++ intOps 
   ++ cmpOps ++ arrayOps ++ errorDecls
 
 compileDecl :: Decl -> [CDecl]

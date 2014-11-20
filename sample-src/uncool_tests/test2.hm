@@ -2,8 +2,8 @@ f() =
   let s = "abcd" in
   let x = in_int() in
   let y = 10 in
-  out_line("test") >>
-  out_line(s) >> 
+  out_string("test") >>
+  out_string(s) >> 
   out_int(x*2+(y-4));
 
 main() = f();
