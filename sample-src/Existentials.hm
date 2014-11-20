@@ -1,0 +1,45 @@
+data Any() of Any(a);
+data List(a) of Nil() | Cons(a, List(a));
+data Test() of Test(List(a), List(a));
+
+id(x) = x;
+
+append(xs, ys) = case xs
+  { Nil() => ys
+  | Cons(x, xs') => Cons(x, append(xs', ys))
+  };
+
+appTest(x) = case x
+  { Test(xs, ys) => Test(Nil(), append(xs, ys)) };
+
+anyTest(x : Any()) = case x
+  { Any(y) => Any(id(y)) };
+
+data F1(a, b) of F1(env, (env, a) -> b);
+
+apF1(f, x) = case f
+  { F1(env, func) => func(env, x) };
+
+ap(f, x) = f(x);
+
+mkF1(f) = F1(f, ap);
+
+data F2(a, b, c) of F2(env, (env, a, b) -> c);
+data And(a,b) of And(a,b);
+
+ap2curried(env, y) = case env
+  { And(f, x) => f(x, y) };
+
+curry2(f, x) = F1(And(f, x), ap2curried);
+
+apF2(f, x, y) = case f
+  { F2(env, func) => func(env, x, y) };
+
+ap2(f, x, y) = f(x, y);
+
+mkF2(f) = F2(f, ap2);
+
+test(f, mapper, newFunc) = case f
+  { F1(env, func) => F1(id(env), id(func)) };
+
+makeList(x) = [Any(2), Any("Hello"), Any(x)];
