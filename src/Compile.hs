@@ -16,13 +16,18 @@ import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Set as S
 import Data.Set (Set)
 
--- | "Core" expressions. We are only allowed to apply functions or case
--- analyze things which are already values.
-data CExpr v = CInt Int32
+-- | Values which can be stored in registers
+data CVal v = CInt Int32
   | CStr String String
   | CVar v
-  | CAp String [v]
-  | CCase v [Production (CExpr v)]
+  deriving Show
+
+-- | "Core" expressions. We are only allowed to apply functions or case
+-- analyze things which are already values.
+data CExpr v =
+    CVal (CVal v)
+  | CAp String [CVal v]
+  | CCase (CVal v) [Production (CExpr v)]
   | CLet v (CExpr v) (CExpr v)
   deriving Show
 
@@ -42,30 +47,34 @@ toCExpr :: Set String -> Expr -> CExpr String
 toCExpr usedVars e = evalState (f e) (0, usedVars `S.union` varsInExp e) 
   where
   f e = case e of
-    EInt i -> return $ CInt i
+    EInt i -> return $ CVal (CInt i)
     EStr s -> do
       (i, vs) <- get
       let i' = i + 1
       put (i', vs)
-      return $ CStr ("str" ++ show i') s
-    EVar v -> return $ CVar v
+      return $ CVal (CStr (".str" ++ show i') s)
+    EVar v -> return $ CVal (CVar v)
     EAp _ func es -> do
       (vs, lets) <- unzip <$> zipWithM funcArgs [1..] es
       case func of 
         "seq" -> head lets <$> f (es !! 1) -- special inlining for seq
         _ -> return $ foldr (.) id lets (CAp func vs)
     ECase e prods -> do
-      v <- newV "scrut"
-      e' <- f e
+      (e', lett) <- letify "scrut" e
       prods' <- mapM doProd prods
-      return $ CLet v e' (CCase v prods')
-    ELet (TypedIdent v _) e1 e2 ->
-      CLet v <$> f e1 <*> f e2
+      return $ lett (CCase e' prods')
+    ELet (TypedIdent v _) e1 e2 -> CLet v <$> f e1 <*> f e2
     Typed e _ -> f e
-  funcArgs i assn = do
-    v <- newV ("arg" ++ show i)
-    assn' <- f assn
-    return (v, CLet v assn')
+  -- introduce a let expression if the expression doesn't involve any
+  -- computation
+  letify name expr = do
+    expr' <- f expr
+    case expr' of
+      CVal v -> return (v, id)
+      x -> do
+        v <- newV name
+        return (CVar v, CLet v expr')
+  funcArgs i = letify ("arg" ++ show i)
   doProd (Production p e) = fmap (Production p) (f e)
   -- create a new variable with a unique name
   newV str = do
@@ -191,7 +200,7 @@ func :: String -> FuncDefn -> [CDecl]
 func fname (FuncDefn args _ expr) = flip evalState initState $ do
   loads <- zipWithM newVar args' (map Reg funcRegs)
   (decls, instrs) <- ff Nothing fname expr' 
-  return (Label fname (loads ++ instrs) : decls)
+  return (Label fname (concat loads ++ instrs) : decls)
   where
   branchState :: State s a -> State s a
   branchState f = do state <- get; x <- f; put state; return x
@@ -210,14 +219,15 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
   ff :: Maybe (RegGlob, Int) -> String -> CExpr String  
      -> Compile ([CDecl], [Instr])
   ff tailc lbl e = case e of
-    CInt i -> (,) [] <$> ret tailc [mov (Imm i) (Reg RAX)]
-    CStr lab str -> let lbl' = lbl ++ lab in
-      (,) [Label lbl' [Ascii (str ++ "\\0")] ] <$>
-        ret tailc [mov (Global lbl') (Reg RAX)]
-    CVar v -> do
-      oper <- getVar v
-      (,) [] <$> ret tailc [mov oper (Reg RAX)]
-    CLet v (CVar v1) e -> dupVar v v1 >> ff tailc lbl e
+    CVal v -> do
+      (decls, oper) <- valsProc lbl v
+      instrs <- ret tailc [mov oper (Reg RAX)]
+      return (decls, instrs)
+    CLet v (CVal val) e -> do
+      (decls, oper) <- valsProc lbl val
+      load <- newVar v oper
+      (decls2, instrs2) <- ff tailc lbl e
+      return (decls ++ decls2, load ++ instrs2)
     CLet v e1 e2 -> do
       let lblL = lbl ++ ".L"
       ss <- gets stackSize
@@ -225,32 +235,38 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
       (decls, instrs) <- branchState $ ff tailc' (lbl ++ ".l") e1
       load <- newVar v (Reg RAX)
       (decls2, instrs2) <- ff tailc lblL e2
-      return (Label lblL (load : instrs2) : decls ++ decls2
+      return (Label lblL (load ++ instrs2) : decls ++ decls2
              , instrs)
     CAp f xs -> do
       moper <- mGetVar f
       let (loadF, rgF) = case moper of
             Nothing -> ([], RGG (toSymbolName f))
             Just oper -> ([movq oper (Reg R12)], RGR R12)
-      argOpers <- mapM getVar xs
+      (decls, argOpers) <- unzip <$> mapM (valsProc lbl) xs
       let loadArgs = zipWith mov argOpers (map Reg funcRegs)
-      (,) [] <$> case tailc of
+      (,) (concat decls) <$> case tailc of
         Nothing -> ret (Just (rgF, 0)) (loadArgs ++ loadF)
         Just _ -> ret tailc (loadArgs ++ loadF ++ [Call rgF])
     CCase v prods -> do
-      oper <- getVar v
-      (decls, instrs) <- unzip <$> mapM (mkCase tailc lbl) prods
-      return (errorMsg : concat decls, 
+      (decls1, oper) <- valsProc lbl v
+      (decls2, instrs) <- unzip <$> mapM (mkCase tailc lbl) prods
+      return (errorMsg : decls1 ++ concat decls2, 
         [ mov oper (Reg RAX) ] ++ concat instrs ++ 
         callFunc "error" [Global errorLbl] (const [])
         )
+
+  valsProc lbl v = case v of
+    CInt i -> return ([], Imm i)
+    CStr lab str -> let lbl' = lbl ++ lab in return
+      ([Label lbl' [Ascii (str ++ "\\0")] ], (Global lbl'))
+    CVar var -> (,) [] <$> getVar var
   
   mkCase :: Maybe (RegGlob, Int) -> String -> Production (CExpr String)
          -> Compile ([CDecl], [Instr])
   mkCase tailc lbl (Production (Pattern constr vars) expr) = branchState $ do
     loads <- zipWithM f [1..] vars
     (decls, instrs) <- ff tailc lbl' expr
-    return ( Label lbl' (loads ++ instrs) : decls ,
+    return ( Label lbl' (concat loads ++ instrs) : decls ,
       conditionalCall )
     where
     conditionalCall = [ BinOp "cmpl" (Imm (hash constr)) (Mem 0 RAX)
@@ -309,22 +325,22 @@ type Compile = State CompileState
 initState :: CompileState
 initState = CompileState M.empty 0
 
--- | Give a new name to an already existing variable.
-dupVar :: String -> String -> Compile ()
-dupVar new old = do
-  CompileState vars stacksize <- get
-  oper <- getVar old
-  put (CompileState (M.insert new oper vars) stacksize)
-  
--- Push a new variable onto the stack
-newVar :: String -> Oper -> Compile Instr
+-- Introduce a new variable into the local context
+newVar :: String -> Oper -> Compile [Instr]
 newVar n oldOper = do
-  CompileState vars stackSize <- get
-  let stackSize' = stackSize + 1
-  let oper = Mem 0 RSP
-  put (CompileState (M.insert n oper (M.map f vars)) stackSize')
-  return (push oldOper)
+  case oldOper of
+    Imm _ -> noNewVar; Global _ -> noNewVar; Mem _ RSP -> noNewVar
+    _ -> do -- push a new variable onto the stack
+      CompileState vars ss <- get
+      let ss' = ss + 1
+      let oper = Mem 0 RSP
+      put (CompileState (M.insert n oper (M.map f vars)) ss')
+      return [push oldOper]
   where
+  noNewVar = do -- we don't need to put a new variable on the stack
+    CompileState vars ss <- get
+    put $ CompileState (M.insert n oldOper vars) ss
+    return []
   f (Mem i RSP) = Mem (8 + i) RSP
   f x = x
 
