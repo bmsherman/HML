@@ -19,8 +19,13 @@ data List(a) of Nil() | Cons(a, List(a));
 
 -- create a list of the Fibonacci sequence from "start" to "end"
 allFibs(start : Int, end : Int) : List(Int) = case end < start
-  {  True()  => Nil()
+  { True()  => Nil()
   | False() => Cons(fibs(start), allFibs(start + 1, end))
   };
 
-main() = allFibs(0, 20);
+printList(printer, xs) = case xs
+  { Nil()       => 0
+  | Cons(y, ys) => printer(y) >> out_string("\n") >> printList(printer, ys)
+  };
+
+main() = printList(out_int, allFibs(0, 20));

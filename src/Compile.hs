@@ -16,6 +16,8 @@ import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Set as S
 import Data.Set (Set)
 
+-- | "Core" expressions. We are only allowed to apply functions or case
+-- analyze things which are already values.
 data CExpr v = CInt Int32
   | CStr String String
   | CVar v
@@ -24,6 +26,7 @@ data CExpr v = CInt Int32
   | CLet v (CExpr v) (CExpr v)
   deriving Show
 
+-- | Return the set of variable names used in an expression.
 varsInExp :: Expr -> Set String
 varsInExp e = case e of
   ELet (TypedIdent v _) e1 e2 -> 
@@ -34,6 +37,7 @@ varsInExp e = case e of
   Typed e _ -> varsInExp e
   _ -> S.empty
 
+-- | Convert a high-level expression to a core expression.
 toCExpr :: Set String -> Expr -> CExpr String
 toCExpr usedVars e = evalState (f e) (0, usedVars `S.union` varsInExp e) 
   where
@@ -63,18 +67,22 @@ toCExpr usedVars e = evalState (f e) (0, usedVars `S.union` varsInExp e)
     assn' <- f assn
     return (v, CLet v assn')
   doProd (Production p e) = fmap (Production p) (f e)
+  -- create a new variable with a unique name
   newV str = do
     (i, vs) <- get
     let str' : _ = [ n | n <- map (str ++) ( "" : map show [ 0 :: Int .. ] )
                        , not (S.member n vs) ]
     put (i, S.insert str' vs) >> return str'
 
+-- | Either a register or a global label. Used for addresses to call
+-- or jump to in the assembly code.
 data RegGlob = RGR Register | RGG String deriving Eq
 
 instance Show RegGlob where
   show (RGR reg) = "*" ++ show reg
   show (RGG global) = global
 
+-- Assembly instructions
 data Instr = 
     BinOp String Oper Oper
   | UnOp String Oper
@@ -96,13 +104,14 @@ add = BinOp "add"
 imul = BinOp "imul"
 push = UnOp "push"
 pop = UnOp "pop"
-idiv = UnOp "idiv"
 
+-- | A labeled set of assembly instructions.
 data CDecl = Label String [Instr] deriving (Eq, Show)
 
+-- | X64 registers that we use.
 data Register = 
     RAX | RCX | RDX
-  | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
+  | R8 | R9 | R12 | R13
   | RDI | RSI
   | RSP
   deriving (Eq, Enum)
@@ -114,18 +123,19 @@ instance Show Register where
     RDX -> "rdx"
     R8 -> "r8"
     R9 -> "r9"
-    R10 -> "r10"
-    R11 -> "r11"
     R12 -> "r12"
     R13 -> "r13"
-    R14 -> "r14"
-    R15 -> "r15"
     RDI -> "rdi"
     RSI -> "rsi"
     RSP -> "rsp"
 
-data Oper = Global String
-  | Imm Int32 | Reg Register | Mem Int Register 
+-- | An operand for operator instructions such as 'mov'.
+data Oper = 
+    Global String -- ^ reference to a global label
+  | Imm Int32 -- ^ an immediate integer value
+  | Reg Register -- ^ contents of a register
+  | Mem Int Register -- ^ main memory at a given offset from the address
+                     -- in a given register
   deriving (Eq, Show)
 
 printOper :: Oper -> String
@@ -153,6 +163,11 @@ printCDecl :: CDecl -> String
 printCDecl (Label name instrs) = name ++ ":\n" ++ 
   intercalate "\n" (map (("  " ++) . printInstr) instrs)
 
+-- | Compile the function calls for data constructors.
+-- We compile nullary constructors specially, because we shouldn't need to do
+-- any allocation each time we call a nullary constructor; we can simply make
+-- a global variable that corresponds to the nullary constructor, and return
+-- a pointer to that.
 constructor :: String -> Int -> [CDecl]
 constructor name 0 = 
   [ Label (name ++ ".hash") [Quad (hash name)]
@@ -166,23 +181,34 @@ constructor name arity = [Label name $ mkFunc $ \xs ->
     [ pop (Mem (8 * i) addr) | i <- take arity [1..] ]
   )]
 
+-- | Use a simple hash so that constructors with different names are given
+-- different tags.
 hash :: String -> Int32
 hash = foldl' (\h c -> 33 * h `B.xor` fromIntegral (fromEnum c)) 5381
 
+-- | Compile a function definition.
 func :: String -> FuncDefn -> [CDecl]
 func fname (FuncDefn args _ expr) = flip evalState initState $ do
   loads <- zipWithM newVar args' (map Reg funcRegs)
   (decls, instrs) <- ff Nothing fname expr' 
   return (Label fname (loads ++ instrs) : decls)
   where
+  branchState :: State s a -> State s a
   branchState f = do state <- get; x <- f; put state; return x
+  ret :: Maybe (RegGlob, Int) -> [Instr] -> Compile [Instr]
   ret tailc instrs = do
      cleanup <- mkCleanup initStackSize
      return (instrs ++ cleanup ++ [retInstr])
     where
+    mkCleanup init = do
+      fin <- gets stackSize
+      let i = fin - init
+      return [ add (Imm (8 * fromIntegral i)) (Reg RSP) | i > 0 ]
     (initStackSize, retInstr) = case tailc of
       Nothing -> (0, Ret)
       Just (retAddr, ss) -> (ss, Jump "jmp" retAddr)
+  ff :: Maybe (RegGlob, Int) -> String -> CExpr String  
+     -> Compile ([CDecl], [Instr])
   ff tailc lbl e = case e of
     CInt i -> (,) [] <$> ret tailc [mov (Imm i) (Reg RAX)]
     CStr lab str -> let lbl' = lbl ++ lab in
@@ -219,11 +245,12 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
         callFunc "error" [Global errorLbl] (const [])
         )
   
+  mkCase :: Maybe (RegGlob, Int) -> String -> Production (CExpr String)
+         -> Compile ([CDecl], [Instr])
   mkCase tailc lbl (Production (Pattern constr vars) expr) = branchState $ do
     loads <- zipWithM f [1..] vars
     (decls, instrs) <- ff tailc lbl' expr
-    instrs' <- ret tailc (loads ++ instrs)
-    return ( Label lbl' instrs' : decls ,
+    return ( Label lbl' (loads ++ instrs) : decls ,
       conditionalCall )
     where
     conditionalCall = [ BinOp "cmpl" (Imm (hash constr)) (Mem 0 RAX)
@@ -237,62 +264,59 @@ func fname (FuncDefn args _ expr) = flip evalState initState $ do
   args' = [ n | TypedIdent n _ <- args ]
   expr' = toCExpr (S.fromList args') expr
 
-intOp :: (Oper -> Oper -> Instr) -> [Instr]
-intOp op = mkFunc $ \(x:y:_) ->
-  [ mov (Reg x) (Reg RAX)
-  , op (Reg y) (Reg RAX)
-  ]
-
-cmpOp :: String -> [Instr]
-cmpOp trueCond = mkFunc $ \(x:y:_) ->
-    [ cmp (Reg y) (Reg x)
-    , Jump ("j" ++ trueCond) (RGG "True")
-    , mov (Global "False.hash") (Reg RAX)
-    ]
-
+-- | Primitive integer operations
 intOps :: [CDecl]
 intOps = negOp : [ Label (toSymbolName x) (intOp y)
   | (x, y) <- [ ("plus", add), ("minus", BinOp "sub"), ("times", imul) ]
   ] where
+  intOp op = mkFunc $ \(x:y:_) ->
+    [ mov (Reg x) (Reg RAX)
+    , op (Reg y) (Reg RAX)
+    ]
   negOp = Label (toSymbolName "negate") $ mkFunc $ \(x:_) ->
     [ UnOp "neg" (Reg x), mov (Reg x) (Reg RAX) ]
 
+-- | Primitive integer comparison operations
 cmpOps :: [CDecl]
 cmpOps = [ Label (toSymbolName (x ++ "Int")) (cmpOp y)
   | (x, y) <- [ ("lt", "l"), ("lte", "le"), ("eq", "e")
               , ("gt", "ge"), ("gte", "g") ]
   ]
+  where
+  cmpOp trueCond = mkFunc $ \(x:y:_) ->
+    [ cmp (Reg y) (Reg x)
+    , Jump ("j" ++ trueCond) (RGG "True")
+    , mov (Global "False.hash") (Reg RAX) ]
 
+-- | The integer division operation
 divOp :: CDecl
 divOp = Label (toSymbolName "div") $ mkFunc $ \(x:y:_) ->
   [ clear (Reg RDX)
   , mov (Reg x) (Reg RAX)
   , mov (Reg y) (Reg RSI)
-  , idiv (Reg RSI)
+  , UnOp "idiv" (Reg RSI)
   , Ret ]
 
+-- | The state of our registers/main memory to keep track of as we walk
+-- through the assembly we generate as we compile.
 data CompileState = CompileState
-  { vars :: !(Map String Oper)
-  , stackSize :: !Int
-  }
+  { vars      :: !(Map String Oper)
+  , stackSize :: !Int               }
 
-mkCleanup :: Int -> Compile [Instr]
-mkCleanup init = do
-  fin <- gets stackSize
-  let i = fin - init
-  return [ add (Imm (8 * fromIntegral i)) (Reg RSP) | i > 0 ]
+type Compile = State CompileState
 
+-- | Initially, we have no variables, and the stack is empty.
 initState :: CompileState
 initState = CompileState M.empty 0
 
+-- | Give a new name to an already existing variable.
 dupVar :: String -> String -> Compile ()
 dupVar new old = do
   CompileState vars stacksize <- get
   oper <- getVar old
   put (CompileState (M.insert new oper vars) stacksize)
   
-  
-
+-- Push a new variable onto the stack
 newVar :: String -> Oper -> Compile Instr
 newVar n oldOper = do
   CompileState vars stackSize <- get
@@ -304,14 +328,19 @@ newVar n oldOper = do
   f (Mem i RSP) = Mem (8 + i) RSP
   f x = x
 
+-- | Lookup a variable which should be somewhere in memory.
 mGetVar :: String -> Compile (Maybe Oper)
 mGetVar n = fmap (M.lookup n . vars) get
 
+-- | If a variable name doesn't exist, then it must be a global
+-- (this is only applicable for functions).
 getVar :: String -> Compile Oper
 getVar n = fromMaybe (Global n) <$> mGetVar n
 
-type Compile = State CompileState
-
+-- | The registers in which the first 6 arguments of a function are put.
+-- Currently, functions with greater than 6 arguments are not supported,
+-- and will probably fail to compile. However, you can obviously use ADTs
+-- to allow functions to accept more parameters.
 funcRegs :: [Register]
 funcRegs = [RDI, RSI, RDX, RCX, R8, R9]
 
@@ -337,15 +366,13 @@ intio =
   , Label "int.Format"
     [ Asciz "%ld" ]
   , Label "in_int" $ mkFunc $ \_ ->
-    callFunc "malloc" [Imm 8] $ \addr -> 
-      [ push (Reg addr)
-      , mov (Reg addr) (Reg RSI)
-      , mov (Global "int.Format") (Reg RDI)
-      , clear (Reg RAX)
-      , Call (RGG "scanf")
-      , pop (Reg RAX)
-      , mov (Mem 0 RAX) (Reg RAX)
-      ]
+    [ push (Imm 12345678)
+    , mov (Reg RSP) (Reg RSI)
+    , mov (Global "int.Format") (Reg RDI)
+    , clear (Reg RAX)
+    , Call (RGG "scanf")
+    , pop (Reg RAX)
+    ]
   ]
 
 outstring :: CDecl
@@ -369,13 +396,14 @@ arrayOps =
          [pop (Reg RAX)]))
   ]
   where
+  -- Compute the memory address for arr[pos]
   offset pos arr = 
     [ mov (Reg pos) (Reg R12)
     , imul (Imm 8) (Reg R12)
     , add (Reg R12) (Reg arr) ]
 
-    
 
+-- | 'error' prints an error message and aborts the computation.
 errorDecls :: [CDecl]
 errorDecls = [ Label "error" $
   [ mov (Reg RDI) (Reg RSI)
@@ -388,16 +416,20 @@ errorDecls = [ Label "error" $
   , Label "error.msg" [ Asciz "Error: %s\\n" ]
   ]
 
+-- | The primitive operations.
 primOps :: [CDecl]
 primOps = outstring : divOp : intio ++ intOps 
   ++ cmpOps ++ arrayOps ++ errorDecls
 
+-- | Produce the proper x64 for a top-level declaration.
 compileDecl :: Decl -> [CDecl]
 compileDecl d = case d of
   DataDecl _ (DataDefn _ alts) ->
     [ l | DataAlt name args <- alts, l <- constructor name (length args) ]
   FuncDecl fname funcDefn -> func fname funcDefn
 
+-- | Convert a variable name to a symbol name that's safe to use with
+-- the GNU assembler.
 toSymbolName :: String -> String
 toSymbolName = concatMap f where
   f '\'' = ".P"
