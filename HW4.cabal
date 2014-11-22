@@ -1,4 +1,4 @@
-name:                HW3
+name:                HW4
 version:             0.1.0.0
 license:             AllRightsReserved
 license-file:        LICENSE
@@ -9,7 +9,7 @@ cabal-version:       >=1.10
 data-files:          Prelude.hm
 extra-source-files:  sample-src/*.hm sample-src/error_files/*.hm HW4.sh
 extra-source-files:  sample-src/uncool_tests/*.hm sample-asm/Makefile
-extra-source-files:  src/Paths_HW3.hs README.md GettingStarted.markdown
+extra-source-files:  src/Paths_HW4.hs README.md GettingStarted.markdown
 
 library
   hs-source-dirs:      src
@@ -27,9 +27,9 @@ library
 executable Typecheck
   default-language:    Haskell2010
   main-is:             Typechecker.hs
-  build-depends:       base >= 4.5 && <4.8, HW3
+  build-depends:       base >= 4.5 && <4.8, HW4
 
 executable Compile
   default-language:    Haskell2010
   main-is:             Compiler.hs
-  build-depends:       base >= 4.5 && <4.8, HW3, containers >= 0.4 && <0.6
+  build-depends:       base >= 4.5 && <4.8, HW4, containers >= 0.4 && <0.6

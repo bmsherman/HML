@@ -304,14 +304,16 @@ cmpOps = [ Label (toSymbolName (x ++ "Int")) (cmpOp y)
     , Jump ("j" ++ trueCond) (RGG "True")
     , mov (Global "False.hash") (Reg RAX) ]
 
--- | The integer division operation
-divOp :: CDecl
-divOp = Label (toSymbolName "div") $ mkFunc $ \(x:y:_) ->
-  [ clear (Reg RDX)
-  , mov (Reg x) (Reg RAX)
-  , mov (Reg y) (Reg RSI)
-  , UnOp "idiv" (Reg RSI)
-  , Ret ]
+-- | The integer division and modulus operations
+divOps :: [CDecl]
+divOps = 
+  [ Label (toSymbolName n) $ mkFunc $ \(x:y:_) ->
+    [ clear (Reg RDX)
+    , mov (Reg x) (Reg RAX)
+    , mov (Reg y) (Reg RSI)
+    , UnOp "idiv" (Reg RSI) ]
+    ++ ops
+  | (n, ops) <- [("div", []), ("mod", [mov (Reg RDX) (Reg RAX)])] ]
 
 -- | The state of our registers/main memory to keep track of as we walk
 -- through the assembly we generate as we compile.
@@ -434,7 +436,7 @@ errorDecls = [ Label "error" $
 
 -- | The primitive operations.
 primOps :: [CDecl]
-primOps = outstring : divOp : intio ++ intOps 
+primOps = outstring : intio ++ intOps ++ divOps
   ++ cmpOps ++ arrayOps ++ errorDecls
 
 -- | Produce the proper x64 for a top-level declaration.

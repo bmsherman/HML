@@ -14,12 +14,14 @@ import qualified Data.Map as M
 data Value = VInt Int32
   | VStr String
   | VConstrAp String [Value]
+  | VFunc String
   deriving Show
 
 pprintV :: Value -> String
 pprintV x = case x of
   VInt i -> show i
   VStr s -> show s
+  VFunc s -> "Function " ++ s
   VConstrAp dcon vals -> 
     dcon ++ "(" ++ intercalate ", " (map pprintV vals) ++ ")"
 
@@ -53,6 +55,7 @@ interpreter = Evaluator
     [ ("plus", binOp (+))
     , ("times", binOp (*))
     , ("div", binOp div)
+    , ("mod", binOp mod)
     , ("minus", binOp (-))
     , ("ltInt", binCmp (<))
     , ("lteInt", binCmp (<=))
@@ -60,6 +63,7 @@ interpreter = Evaluator
     , ("gteInt", binCmp (>=))
     , ("gtInt", binCmp (>))
     , ("negate", neg)
+    , ("seq", EvalInterp $ \_ [x,y] -> Right y)
     ]
 
 data EvalContext = Ctxt
@@ -75,7 +79,7 @@ eval ctxt e = case e of
   EInt i -> return (VInt i)
   EStr s -> return (VStr s)
   EVar vname -> case M.lookup vname (vars ctxt) of
-    Nothing -> Left ("Variable " ++ show vname ++ "not in scope")
+    Nothing -> return (VFunc vname)
     Just v -> return v
   EAp DataCon dcon exprs -> 
     VConstrAp dcon <$> mapM (eval ctxt) exprs

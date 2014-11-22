@@ -26,9 +26,8 @@ evalMain decls = mainFunc gctxt [] where
 
 makeContext :: Evaluator -> [Decl] -> Map String EvalInterp
 makeContext (Evaluator primOps compile) = 
-  M.union prims  . M.fromList . mapMaybe f
+  M.union primOps . M.fromList . mapMaybe f
   where
   f (FuncDecl name defn) = Just (name, compile defn)
   f _ = Nothing
-  prims = M.mapKeys ('_' :) primOps
 

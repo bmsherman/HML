@@ -1,0 +1,98 @@
+-- Here we define our own big number library. It only is meant to handle
+-- non-negative numbers at this time.
+data BigInt() of Small(Int) | Big(Int, BigInt());
+
+fromInt(x : Int) : BigInt() = let big = x / 10000 in case big < 1
+  { True() => Small(x)
+  | False() => Big(mod(x, 10000), fromInt(big))
+  };
+
+-- 'plusSmall' and 'plusB' are mutually recursive! Unfortunately, we
+-- process functions one at a time. Here we hack around this limitation:
+-- we just make 'plusB' an argument to 'plusSmall'.
+plusSmall(plusB, x : Int, y : BigInt()) = case y
+  { Small(y') => fromInt(x + y')
+  | Big(lo, hi) => case fromInt(x + lo)
+    { Small(lo') => Big(lo', hi)
+    | Big(lo', newhi) => Big(lo', plusB(newhi, hi))
+    }
+  };
+
+-- Add together two BigInts
+plusB(x, y) = case x
+  { Small(a) => plusSmall(plusB, a, y)
+  | Big(lo, hi) => case plusSmall(plusB, lo, y)
+    { Small(lo') => Big(lo', hi)
+    | Big(lo', hi') => Big(lo', plusB(hi', hi))
+    }
+  };
+
+timesSmall(x : Int, y : BigInt()) = case y
+  { Small(y') => fromInt(x * y')
+  | Big(lo, hi) => plusB(fromInt(x * lo)
+     , Big(0, timesSmall(x, hi)))
+  };
+
+-- multiply two BigInts
+timesB(x, y) = case x
+  { Small(x') => timesSmall(x', y)
+  | Big(lo, hi) => plusB(timesSmall(lo, y), 
+                        Big(0, timesB(hi, y)))
+  };
+
+-- print out an Int whose value is less than 10000 with leading zeros
+-- so that the output always has 4 digits
+out_intlz(x) = 
+  case x < 1000 { True() => out_string("0") | False() => 0 } >>
+  case x < 100 { True() => out_string("0") | False() => 0 } >>
+  case x < 10 { True() => out_string("0") | False() => 0 } >>
+  out_int(x);
+
+-- print out a BigInt
+showB(x) = case x
+  { Small(x') => out_int(x')
+  | Big(lo, hi) => showB(hi) >> out_intlz(lo)
+  };
+
+data Ordering() of LT() | EQ() | GT();
+
+ordInt(x, y) = case x <= y
+  { True() => case x < y
+    { True() => LT()
+    | False() => EQ()
+    }
+  | False() => GT()
+  };
+
+ordB(x, y) = case x
+  { Small(x') => case y
+    { Small (y') => ordInt(x', y')
+    | Big(lo, hi) => LT()
+    }
+  | Big(lo, hi) => case y
+    { Small(y') => GT()
+    | Big(lo', hi') => case ordB(hi, hi')
+      { LT() => LT()
+      | EQ() => ordInt(lo, lo')
+      | GT() => GT()
+      }
+    }
+  };
+
+lteB(x, y) = case ordB(x, y)
+  { LT() => True()
+  | EQ() => True()
+  | GT() => False()
+  };
+
+facs(acc, i) = 
+  showB(i) >>
+  out_string("! = ") >>
+  showB(acc) >>
+  out_string("\n") >>
+  let i' = plusSmall(plusB,1,i) in
+  facs(timesB(i', acc), i') ;
+
+-- Print the factorials of every number, starting with 0!
+-- (Until we run out of memory, or patience, that is...)
+main() = facs(fromInt(1), fromInt(0));

@@ -1,0 +1,2 @@
+-- Confirming that we catch failed pattern matches
+main() = case 0 {};

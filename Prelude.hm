@@ -19,6 +19,7 @@ minus(x : Int, y : Int) : Int = undefined(); -- -
 times(x : Int, y : Int) : Int = undefined(); -- *
 div(x : Int, y : Int) : Int = undefined(); -- /
 negate(x : Int) : Int = undefined(); -- ~
+mod(x : Int, y : Int) : Int = undefined();
 
 ltInt(x : Int, y : Int) : Bool() = undefined(); -- <
 lteInt(x : Int, y : Int) : Bool() = undefined(); -- <=

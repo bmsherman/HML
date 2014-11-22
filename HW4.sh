@@ -21,7 +21,7 @@ do
   cat $file | dist/build/Compile/Compile > sample-asm/uncool_tests/test${i}.S
 done
 
-for f in ArrayExample BST Error Fact Mergesort Quicksort Stream
+for f in ArrayExample BST Error FactFib FactStream Mergesort Quicksort Stream
 do
   cat sample-src/${f}.hm | dist/build/Compile/Compile > sample-asm/${f}.S
 done
