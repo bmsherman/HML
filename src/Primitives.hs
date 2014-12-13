@@ -1,7 +1,7 @@
 module Primitives where
 
 import AST (Decl)
-import Paths_HW4 (getDataFileName)
+import Paths_HML (getDataFileName)
 import Parse (parseDecls)
 import Typecheck (Context, emptyContext)
 

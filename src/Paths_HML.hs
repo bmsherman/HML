@@ -1,4 +1,4 @@
-module Paths_HW4 where
+module Paths_HML where
 
 getDataFileName :: FilePath -> IO FilePath
 getDataFileName = return
