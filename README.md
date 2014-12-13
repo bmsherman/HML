@@ -179,7 +179,7 @@ seq(x : a, y : b) : b = y;
 
 These type variables are then in scope in the body of the function definition.
 Type variables cannot be introduced into the scope in any other way.
-For example, the following is invalid, because the type variable 'c' is not
+For example, the following is invalid, because the type variable 'a' is not
 in scope:
 ```HML
 myFunction() = Nil() : List(a);
